@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, Trash2, Copy, CheckCircle2, Download, RefreshCw, 
   Car, Wallet, DollarSign, Clipboard, AlertCircle, Loader2, 
-  FileText, Layout, Share2, History, Banknote, Bell, AlertTriangle, TrendingUp
+  FileText, Layout, Share2, History, Banknote, Bell, AlertTriangle, TrendingUp,
+  Image as ImageIcon, X
 } from 'lucide-react';
 
 const VEHICULES_DEFAUT = [
@@ -53,16 +54,55 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewMode, setPreviewMode] = useState('fiche'); // 'fiche' ou 'whatsapp'
+  const [companyLogo, setCompanyLogo] = useState(null);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   // Sauvegarde automatique dans le navigateur
   useEffect(() => {
     const saved = localStorage.getItem('fleet_pro_draft');
+    const savedLogo = localStorage.getItem('fleet_pro_logo');
     if (saved) setFormData(JSON.parse(saved));
+    if (savedLogo) setCompanyLogo(savedLogo);
+    
+    // Écouteur pour l'installation PWA (Progressive Web App)
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   useEffect(() => {
     localStorage.setItem('fleet_pro_draft', JSON.stringify(formData));
   }, [formData]);
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCompanyLogo(reader.result);
+        localStorage.setItem('fleet_pro_logo', reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removeLogo = () => {
+    setCompanyLogo(null);
+    localStorage.removeItem('fleet_pro_logo');
+  };
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    }
+  };
 
   const updateField = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
 
@@ -308,9 +348,16 @@ export default function App() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <Car className="text-blue-400" /> Flotte <span className="font-light">Pro</span>
           </h1>
-          <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors border border-slate-700">
-            <RefreshCw size={16} /> Nouvelle Fiche
-          </button>
+          <div className="flex items-center gap-3">
+            {deferredPrompt && (
+              <button onClick={handleInstallClick} className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm transition-colors">
+                <Download size={14} /> <span className="hidden sm:inline">Installer l'Appli</span>
+              </button>
+            )}
+            <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors border border-slate-700">
+              <RefreshCw size={16} /> <span className="hidden sm:inline">Nouvelle Fiche</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -341,13 +388,28 @@ export default function App() {
                 <label className="block text-xs font-bold text-slate-600 mb-1">Chauffeur / Gérant (Optionnel)</label>
                 <input type="text" placeholder="Ex: Ali" value={formData.chauffeur} onChange={e => updateField('chauffeur', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
               </div>
+              <div className="sm:col-span-4 flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                 {companyLogo ? (
+                   <div className="relative shrink-0">
+                     <img src={companyLogo} alt="Logo" className="h-12 w-12 object-contain bg-white rounded-lg border border-slate-200 shadow-sm" />
+                     <button onClick={removeLogo} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors"><X size={12}/></button>
+                   </div>
+                 ) : (
+                   <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-colors shrink-0">
+                     <ImageIcon size={16} className="text-blue-500"/>
+                     Ajouter un Logo
+                     <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                   </label>
+                 )}
+                 <p className="text-xs text-slate-400">Ce logo apparaîtra en haut à droite sur votre fiche au format Image/PDF.</p>
+              </div>
             </div>
           </div>
 
           {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-emerald-500">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-bold text-emerald-600 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> Recettes</h2>
+              <h2 className="text-sm font-bold text-emerald-600 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> Recettes Véhicules</h2>
               <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded-lg">Total : {formatArgent(totaux.recettes)} F</span>
             </div>
             
@@ -370,6 +432,12 @@ export default function App() {
                     <div>
                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
                       <input type="number" placeholder="Ex: 15000" value={r.montant} onChange={(e) => updateRecette(r.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none" />
+                    </div>
+                    <div className="sm:col-span-2">
+                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif / Justification</label>
+                       <select value={r.motif} onChange={(e) => updateRecette(r.id, 'motif', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none">
+                         {MOTIFS_RECETTE.map(opt => <option key={opt}>{opt}</option>)}
+                       </select>
                     </div>
                   </div>
                 </div>
@@ -597,16 +665,21 @@ export default function App() {
             {previewMode === 'fiche' && (
               <div id="fiche-preview" className="w-full max-w-sm bg-white rounded-2xl shadow-lg border border-slate-200 flex flex-col overflow-hidden text-slate-800">
                 <div className="bg-slate-900 p-5 text-white">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="text-lg font-black uppercase tracking-wider">{formData.flotteName || 'SANS NOM'}</h3>
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-black uppercase tracking-wider leading-tight">{formData.flotteName || 'SANS NOM'}</h3>
                       <p className="text-[10px] text-blue-300 font-bold mt-1 tracking-widest uppercase">{formData.typeRapport}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-300">Date: {new Date(formData.date).toLocaleDateString('fr-FR')}</p>
+                    {companyLogo && (
+                      <div className="shrink-0 bg-white p-1 rounded-xl shadow-sm">
+                        <img src={companyLogo} alt="Logo" className="w-10 h-10 object-contain rounded-lg" />
+                      </div>
+                    )}
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-slate-300">Date: <br className="sm:hidden"/>{new Date(formData.date).toLocaleDateString('fr-FR')}</p>
                     </div>
                   </div>
-                  {formData.chauffeur && <p className="text-xs font-medium text-slate-300 mt-2 pt-2 border-t border-slate-800">Chauffeur / Gérant: {formData.chauffeur}</p>}
+                  {formData.chauffeur && <p className="text-xs font-medium text-slate-300 mt-3 pt-2 border-t border-slate-800">Chauffeur / Gérant: <span className="font-bold text-white">{formData.chauffeur}</span></p>}
                 </div>
 
                 <div className="p-5 space-y-5">
@@ -692,6 +765,30 @@ export default function App() {
 
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-3">
                     <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Clipboard size={12}/> Bilan & Caisse</h4>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between text-slate-600">
+                        <span>Solde Net :</span>
+                        <span className="font-bold">{formatArgent(totaux.solde)} F</span>
+                      </div>
+                      {formData.caisseDisponible && (
+                        <div className="flex justify-between text-slate-600">
+                          <span>Dispo en caisse :</span>
+                          <span className="font-bold">{formatArgent(formData.caisseDisponible)} F</span>
+                        </div>
+                      )}
+                      {formData.versement && (
+                        <div className="flex justify-between text-emerald-700 font-medium">
+                          <span>Versement effectué :</span>
+                          <span className="font-bold">{formatArgent(formData.versement)} F</span>
+                        </div>
+                      )}
+                      {(formData.caisseDisponible || formData.versement) && (
+                        <div className="flex justify-between border-t border-slate-200 mt-1.5 pt-1.5 font-bold">
+                          <span className="text-slate-500">Reste en caisse calculé :</span>
+                          <span className={totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}>{formatArgent(totaux.resteEnCaisse)} F</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {}
