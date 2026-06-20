@@ -9,11 +9,11 @@ import {
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from "firebase/analytics";
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
 // --- Configuration Firebase Intégrée ---
-const firebaseConfig = {
+const defaultFirebaseConfig = {
   apiKey: "AIzaSyAZrIZAkt4EHRYxRZZ0sbaK1gGERcNplIY",
   authDomain: "rapport-vehicule-bd4c6.firebaseapp.com",
   databaseURL: "https://rapport-vehicule-bd4c6-default-rtdb.firebaseio.com",
@@ -24,10 +24,12 @@ const firebaseConfig = {
   measurementId: "G-PRXEN0M1KQ"
 };
 
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 const auth = getAuth(app);
 const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- Constantes & Données par défaut ---
 const LISTE_MOTIFS = [
@@ -143,7 +145,11 @@ export default function App() {
 
     const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
       } catch (error) {
         console.error("Erreur d'authentification:", error);
         setFirebaseErrorMsg("Authentification Firebase bloquée. Sauvegarde locale activée.");
@@ -167,7 +173,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     try {
-      const q = collection(db, 'users', user.uid, 'reports');
+      const q = collection(db, 'artifacts', appId, 'users', user.uid, 'reports');
       const unsubscribe = onSnapshot(q, 
         (snapshot) => {
           const fetchedReports = [];
@@ -257,10 +263,10 @@ export default function App() {
     
     try {
       if (editingId) {
-        await setDoc(doc(db, 'users', user.uid, 'reports', editingId), dataToSave, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reports', editingId), dataToSave, { merge: true });
         showToast('📌 Rapport mis à jour (Cloud)');
       } else {
-        await addDoc(collection(db, 'users', user.uid, 'reports'), dataToSave);
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'reports'), dataToSave);
         showToast('📌 Nouveau rapport enregistré (Cloud)');
       }
       resetForm();
@@ -311,7 +317,7 @@ export default function App() {
     
     if (user) {
       try {
-        await deleteDoc(doc(db, 'users', user.uid, 'reports', itemToDelete));
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reports', itemToDelete));
       } catch (e) {
         console.error("Erreur Firebase delete", e);
       }
@@ -1252,14 +1258,14 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 bg-slate-50 flex flex-col items-center">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 bg-slate-50 flex flex-col items-center">
               
               {previewMode === 'whatsapp' && (
                 <div 
                   id="report-whatsapp-container" 
-                  className="w-full max-w-md rounded-3xl shadow-sm border border-emerald-200 bg-[#e1fcdc] p-6 flex flex-col transform transition-transform"
+                  className="w-full max-w-lg rounded-3xl shadow-sm border border-emerald-200 bg-[#e1fcdc] p-6 sm:p-8 flex flex-col transform transition-transform"
                 >
-                  <div className="font-mono text-[13px] leading-relaxed text-slate-800 tracking-tight space-y-0.5">
+                  <div className="font-mono text-[14px] sm:text-[15px] leading-relaxed text-slate-800 tracking-tight space-y-1">
                     {renderFormattedBubbleText(generateWhatsAppText())}
                   </div>
                 </div>
@@ -1268,69 +1274,69 @@ export default function App() {
               {previewMode === 'fiche' && (
                 <div 
                   id="report-fiche-container" 
-                  className="w-full max-w-sm bg-white rounded-3xl shadow-lg border border-slate-200/80 flex flex-col p-6 text-slate-800"
+                  className="w-full max-w-md lg:max-w-lg bg-white rounded-3xl shadow-xl border border-slate-200/80 flex flex-col p-6 sm:p-8 text-slate-800"
                 >
-                  <div className="h-2 bg-gradient-to-r from-amber-500 via-indigo-500 to-emerald-500 -mx-6 -mt-6 mb-6 rounded-t-3xl"></div>
+                  <div className="h-2 bg-gradient-to-r from-amber-500 via-indigo-500 to-emerald-500 -mx-6 sm:-mx-8 -mt-6 sm:-mt-8 mb-6 sm:mb-8 rounded-t-3xl"></div>
 
-                  <div className="flex justify-between items-start mb-6 border-b border-dashed border-slate-200 pb-4">
+                  <div className="flex justify-between items-start mb-6 border-b border-dashed border-slate-200 pb-5">
                     <div className="flex-1 pr-2">
-                      <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      <span className="text-[10px] sm:text-xs font-bold bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full uppercase tracking-wider">
                         Rapport {formData.reportType}
                       </span>
-                      <h4 className="text-lg font-bold text-slate-900 mt-1 flex items-center gap-1.5">
-                        <Car size={18} className="text-indigo-600"/> Fiche d'Activité
+                      <h4 className="text-xl font-bold text-slate-900 mt-2.5 flex items-center gap-1.5">
+                        <Car size={22} className="text-indigo-600"/> Fiche d'Activité
                       </h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
+                      <p className="text-xs text-slate-400 mt-1.5">
                         {new Date(formData.reportDate).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                       </p>
                     </div>
                     <div className="text-right flex-1 pl-2 break-words">
-                      <span className="text-xs font-bold text-slate-700 block">{activeOwnerObj?.company || 'Indépendant'}</span>
-                      <span className="text-[10px] text-slate-400 block">{activeOwnerObj?.name}</span>
+                      <span className="text-sm font-bold text-slate-700 block">{activeOwnerObj?.company || 'Indépendant'}</span>
+                      <span className="text-xs text-slate-400 block mt-0.5">{activeOwnerObj?.name}</span>
                     </div>
                   </div>
 
-                  <div className="space-y-3 mb-4">
-                    <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                      <Wallet size={12} className="text-amber-500"/> 1. Recettes véhicules
+                  <div className="space-y-4 mb-6">
+                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Wallet size={14} className="text-amber-500"/> 1. Recettes véhicules
                     </h5>
-                    <div className="space-y-2">
+                    <div className="space-y-2.5">
                       {formData.vehicles.map((v) => {
                         const vName = v.name === 'Autre...' ? v.customReason : v.name;
                         const hasIncident = v.reason && v.reason !== 'RAS (Journée normale)';
                         return (
-                          <div key={v.id} className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex justify-between items-center text-xs">
+                          <div key={v.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center text-sm">
                             <div className="flex-1 min-w-0 pr-2">
                               <span className="font-bold text-slate-700 block whitespace-normal break-words">{vName}</span>
                               {hasIncident && (
-                                <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.2 rounded-md font-medium mt-0.5 inline-block whitespace-normal break-words">
+                                <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-md font-medium mt-1 inline-block whitespace-normal break-words">
                                   ⚠️ {v.reason === 'Autre...' ? v.customReason : v.reason}
                                 </span>
                               )}
                             </div>
-                            <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg shrink-0">
+                            <span className="font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg shrink-0 text-sm">
                               {v.amount ? `${formatAmount(v.amount)} F` : '0 F'}
                             </span>
                           </div>
                         );
                       })}
                     </div>
-                    <div className="bg-amber-50 border border-amber-200/60 p-3 rounded-2xl flex justify-between items-center text-xs font-bold text-amber-900 mt-2">
+                    <div className="bg-amber-50 border border-amber-200/60 p-4 rounded-2xl flex justify-between items-center text-sm font-bold text-amber-900 mt-3 shadow-sm">
                       <span>Recette Totale :</span>
-                      <span className="text-sm text-amber-700">{formatAmount(totalRecette)} FCFA</span>
+                      <span className="text-lg text-amber-700">{formatAmount(totalRecette)} FCFA</span>
                     </div>
                   </div>
 
-                  <div className="space-y-3 mb-4">
-                    <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                      <DollarSign size={12} className="text-emerald-500"/> 2. Dépenses & Solde
+                  <div className="space-y-4 mb-6">
+                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <DollarSign size={14} className="text-emerald-500"/> 2. Dépenses & Solde
                     </h5>
                     {formData.expenses.length > 0 ? (
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         {formData.expenses.map((e) => {
                           const desc = e.description === 'Autre...' ? e.customDescription : e.description;
                           return (
-                            <div key={e.id} className="bg-red-50/40 p-2 rounded-xl border border-red-100/50 flex justify-between items-center text-[11px]">
+                            <div key={e.id} className="bg-red-50/40 p-3 rounded-xl border border-red-100/50 flex justify-between items-center text-sm">
                               <span className="text-slate-600 font-medium whitespace-normal break-words pr-2">{e.vehicleName} - {desc}</span>
                               <span className="font-bold text-red-600 shrink-0">- {formatAmount(e.amount)} F</span>
                             </div>
@@ -1338,68 +1344,69 @@ export default function App() {
                         })}
                       </div>
                     ) : (
-                      <p className="text-[11px] text-slate-400 italic pl-1">Aucune dépense signalée.</p>
+                      <p className="text-sm text-slate-400 italic pl-1">Aucune dépense signalée.</p>
                     )}
 
-                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex justify-between items-center text-xs font-bold mt-2">
-                      <span className="text-slate-700">Solde généré :</span>
-                      <span className="text-sm text-slate-900">{formatAmount(arrearsCalculated.soldeDuJour)} FCFA</span>
+                    <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex justify-between items-center text-sm font-bold mt-3 shadow-sm">
+                      <span className="text-slate-700">Solde généré ce jour :</span>
+                      <span className="text-lg text-slate-900">{formatAmount(arrearsCalculated.soldeDuJour)} FCFA</span>
                     </div>
                   </div>
 
-                  <div className="space-y-3 mb-6 bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl">
-                    <h5 className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1">
-                      <Clipboard size={12} className="text-indigo-600"/> 3. Bilan & Versement
+                  <div className="space-y-4 mb-8 bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl shadow-sm">
+                    <h5 className="text-xs font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
+                      <Clipboard size={14} className="text-indigo-600"/> 3. Bilan & Versement
                     </h5>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white p-2 rounded-xl border border-indigo-100">
-                        <span className="block text-[9px] text-slate-400 font-medium">Ancienne Dette</span>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm">
+                        <span className="block text-xs text-slate-400 font-medium mb-1">Ancienne Dette</span>
                         <span className="font-bold text-slate-700">{formatAmount(formData.arrears.previous)} F</span>
                       </div>
-                      <div className="bg-white p-2 rounded-xl border border-indigo-100">
-                        <span className="block text-[9px] text-slate-400 font-medium">Attendu total</span>
+                      <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm">
+                        <span className="block text-xs text-slate-400 font-medium mb-1">Attendu total</span>
                         <span className="font-bold text-slate-700">{formatAmount(arrearsCalculated.totalDetteDûe)} F</span>
                       </div>
-                      <div className="bg-emerald-50 p-2 rounded-xl border border-emerald-200 col-span-2 flex flex-col justify-center">
+                      <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 col-span-2 flex flex-col justify-center shadow-sm">
                         <div className="flex justify-between items-center">
-                          <span className="block text-[10px] text-emerald-800 font-bold uppercase">Versement</span>
-                          <span className="font-bold text-emerald-700 text-sm">{formatAmount(formData.arrears.paid)} FCFA</span>
+                          <span className="block text-xs text-emerald-800 font-bold uppercase tracking-wider">Versement Caisse</span>
+                          <span className="font-bold text-emerald-700 text-lg">{formatAmount(formData.arrears.paid)} FCFA</span>
                         </div>
                         {(formData.arrears.cashierName || formData.arrears.reason) && (
-                           <div className="mt-1 pt-1 border-t border-emerald-200/50 text-[9px] text-emerald-600 font-medium whitespace-normal break-words">
+                           <div className="mt-3 pt-3 border-t border-emerald-200 text-xs text-emerald-700 font-medium whitespace-normal break-words">
                              {formData.arrears.cashierName && <span className="block">Reçu par: {formData.arrears.cashierName}</span>}
-                             {formData.arrears.reason && <span className="block italic mt-0.5">"{formData.arrears.reason}"</span>}
+                             {formData.arrears.reason && <span className="block italic mt-1 text-emerald-600">"{formData.arrears.reason}"</span>}
                            </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="border-t border-indigo-200 pt-2.5 flex justify-between items-center text-xs mt-1">
+                    <div className="border-t border-indigo-200 pt-4 flex justify-between items-center text-sm mt-3">
                       <span className="font-bold text-indigo-950">Reste dû au propriétaire :</span>
-                      <span className="font-black text-indigo-700 text-sm">{formatAmount(arrearsCalculated.resteDette)} FCFA</span>
+                      <span className="font-black text-indigo-700 text-xl">{formatAmount(arrearsCalculated.resteDette)} FCFA</span>
                     </div>
 
                     {formData.arrears.proofImage && (
-                      <div className="mt-3 pt-3 border-t border-indigo-200 text-center">
-                         <span className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest block mb-2">Preuve de versement attachée</span>
-                         <img src={formData.arrears.proofImage} alt="Preuve" className="rounded-xl border-2 border-white shadow-sm max-h-[150px] mx-auto object-contain bg-slate-200" />
+                      <div className="mt-5 pt-5 border-t border-indigo-200 text-center">
+                         <span className="text-xs text-indigo-500 font-bold uppercase tracking-widest block mb-3">Preuve de versement</span>
+                         <img src={formData.arrears.proofImage} alt="Preuve" className="rounded-2xl border-4 border-white shadow-md max-h-[250px] mx-auto object-contain bg-slate-100" />
                       </div>
                     )}
                   </div>
 
                   {(formData.alerts.length > 0 || formData.customProblem.trim()) && (
-                    <div className="space-y-2 mb-4">
-                      <h5 className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">
+                    <div className="space-y-3 mb-6">
+                      <h5 className="text-xs font-bold text-orange-500 uppercase tracking-widest flex items-center gap-1.5">
                         ⚠️ Alertes & Remarques
                       </h5>
-                      <div className="space-y-1.5">
+                      <div className="space-y-2.5">
                         {formData.alerts.map((a) => (
-                          <div key={a.id} className="text-[11px] bg-orange-50 text-orange-800 p-2 rounded-xl border border-orange-100 whitespace-normal break-words">
-                            <strong>{a.vehicleName}</strong> : {a.category} - {a.description || 'Problème'}
+                          <div key={a.id} className="text-sm bg-orange-50 text-orange-900 p-3.5 rounded-xl border border-orange-200 whitespace-normal break-words shadow-sm">
+                            <strong className="block mb-1">{a.vehicleName}</strong> 
+                            <span className="text-orange-800">{a.category} - {a.description || 'Problème signalé'}</span>
                           </div>
                         ))}
                         {formData.customProblem.trim() && (
-                          <div className="text-[11px] bg-slate-50 text-slate-600 p-2 rounded-xl border border-slate-200 italic whitespace-normal break-words">
+                          <div className="text-sm bg-slate-50 text-slate-700 p-4 rounded-xl border border-slate-200 italic whitespace-normal break-words shadow-sm">
                             "{formData.customProblem}"
                           </div>
                         )}
@@ -1407,9 +1414,9 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="border-t border-dashed border-slate-200 pt-4 text-center mt-auto">
-                    <p className="text-[9px] text-slate-400 font-medium uppercase tracking-wider flex items-center justify-center gap-1">
-                      <Car size={10} className="text-indigo-400"/> Rapport Véhicule Pro • Édition Spéciale
+                  <div className="border-t border-dashed border-slate-200 pt-5 text-center mt-auto">
+                    <p className="text-[10px] sm:text-xs text-slate-400 font-medium uppercase tracking-wider flex items-center justify-center gap-1.5">
+                      <Car size={14} className="text-indigo-400"/> Rapport Véhicule Pro • Édition Spéciale
                     </p>
                   </div>
 
