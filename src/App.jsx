@@ -6,10 +6,6 @@ import {
   Image as ImageIcon, X
 } from 'lucide-react';
 
-const VEHICULES_DEFAUT = [
-  "Véhicule 1 (Suzuki)", "Véhicule 2 (Toyota)", "Véhicule 3 (Kia)", "Autre..."
-];
-
 const DEPENSES_DEFAUT = [
   "Carburant", "Lavage", "Réparation / Garage", "Vidange", "Frais de route", "Autre..."
 ];
@@ -40,7 +36,7 @@ export default function App() {
     date: new Date().toISOString().split('T')[0],
     flotteName: 'Ma Flotte Auto',
     chauffeur: '',
-    recettes: [{ id: Date.now(), vehicule: VEHICULES_DEFAUT[0], montant: '', motif: MOTIFS_RECETTE[0], detail: '' }],
+    recettes: [{ id: Date.now(), vehicule: '', montant: '', motif: MOTIFS_RECETTE[0], justification: '' }],
     depenses: [],
     dettes: [],
     creances: [],
@@ -120,7 +116,7 @@ export default function App() {
   const addRecette = () => {
     setFormData(prev => ({
       ...prev,
-      recettes: [...prev.recettes, { id: Date.now(), vehicule: VEHICULES_DEFAUT[0], montant: '', motif: MOTIFS_RECETTE[0], detail: '' }]
+      recettes: [...prev.recettes, { id: Date.now(), vehicule: '', montant: '', motif: MOTIFS_RECETTE[0], justification: '' }]
     }));
   };
 
@@ -214,7 +210,7 @@ export default function App() {
         date: new Date().toISOString().split('T')[0],
         flotteName: formData.flotteName,
         chauffeur: '',
-        recettes: [{ id: Date.now(), vehicule: VEHICULES_DEFAUT[0], montant: '', motif: MOTIFS_RECETTE[0], detail: '' }],
+        recettes: [{ id: Date.now(), vehicule: '', montant: '', motif: MOTIFS_RECETTE[0], justification: '' }],
         depenses: [],
         dettes: [],
         creances: [],
@@ -252,17 +248,21 @@ export default function App() {
 
     text += `💰 *RECETTES VÉHICULES*\n`;
     d.recettes.forEach(r => {
-      const nom = r.vehicule === 'Autre...' ? r.detail : r.vehicule;
-      const motif = r.motif === 'Autre...' ? r.detail : r.motif;
-      text += `• ${nom} : *${formatArgent(r.montant)} FCFA* ${motif !== 'Recette normale' ? `_(${motif})_` : ''}\n`;
+      const nom = r.vehicule || 'Véhicule non précisé';
+      const motif = r.motif === 'Autre...' ? '' : r.motif;
+      const justif = r.justification ? `(${r.justification})` : '';
+      const motifText = motif && motif !== 'Recette normale' ? `_[${motif}]_` : '';
+      text += `• ${nom} : *${formatArgent(r.montant)} FCFA* ${motifText} ${justif}\n`;
     });
     text += `💵 *Total Recettes : ${formatArgent(totaux.recettes)} FCFA*\n\n`;
 
     if (d.depenses.length > 0) {
       text += `💸 *DÉPENSES*\n`;
       d.depenses.forEach(dep => {
-        const type = dep.type === 'Autre...' ? dep.detail : dep.type;
-        text += `• ${type} : *-${formatArgent(dep.montant)} FCFA*\n`;
+        const type = dep.type === 'Autre...' ? (dep.customType || 'Autre') : dep.type;
+        const detail = dep.detail ? `(${dep.detail})` : '';
+        const nomDepense = [type, detail].filter(Boolean).join(' ');
+        text += `• ${nomDepense} : *-${formatArgent(dep.montant)} FCFA*\n`;
       });
       text += `🔻 *Total Dépenses : ${formatArgent(totaux.depenses)} FCFA*\n\n`;
     }
@@ -431,24 +431,23 @@ export default function App() {
                     <button onClick={() => removeRecette(r.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Véhicule</label>
-                      <select value={r.vehicule} onChange={(e) => updateRecette(r.id, 'vehicule', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none">
-                        {VEHICULES_DEFAUT.map(opt => <option key={opt}>{opt}</option>)}
-                      </select>
-                      {r.vehicule === 'Autre...' && (
-                        <input type="text" placeholder="Saisir le nom..." value={r.detail} onChange={e => updateRecette(r.id, 'detail', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none" />
-                      )}
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Véhicule (Nom ou Immatriculation)</label>
+                      <input type="text" placeholder="Ex: Suzuki Noire AB-1234..." value={r.vehicule} onChange={(e) => updateRecette(r.id, 'vehicule', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-emerald-500" />
                     </div>
                     <div>
                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
-                      <input type="number" placeholder="Ex: 15000" value={r.montant} onChange={(e) => updateRecette(r.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none" />
+                      <input type="number" placeholder="Ex: 15000" value={r.montant} onChange={(e) => updateRecette(r.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none focus:border-emerald-500" />
                     </div>
-                    <div className="sm:col-span-2">
-                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif / Justification</label>
-                       <select value={r.motif} onChange={(e) => updateRecette(r.id, 'motif', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none">
+                    <div>
+                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif de la recette</label>
+                       <select value={r.motif} onChange={(e) => updateRecette(r.id, 'motif', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-emerald-500">
                          {MOTIFS_RECETTE.map(opt => <option key={opt}>{opt}</option>)}
                        </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails / Justification (Optionnel)</label>
+                       <input type="text" placeholder="Préciser si besoin (ex: demi-journée à cause de la pluie)..." value={r.justification} onChange={(e) => updateRecette(r.id, 'justification', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
                 </div>
@@ -473,16 +472,20 @@ export default function App() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
                     <div>
                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif de dépense</label>
-                      <select value={d.type} onChange={(e) => updateDepense(d.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none">
+                      <select value={d.type} onChange={(e) => updateDepense(d.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-rose-500">
                         {DEPENSES_DEFAUT.map(opt => <option key={opt}>{opt}</option>)}
                       </select>
                       {d.type === 'Autre...' && (
-                        <input type="text" placeholder="Précisez..." value={d.detail} onChange={e => updateDepense(d.id, 'detail', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none" />
+                        <input type="text" placeholder="Quelle dépense ?" value={d.customType || ''} onChange={e => updateDepense(d.id, 'customType', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-rose-500" />
                       )}
                     </div>
                     <div>
                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
-                      <input type="number" placeholder="Ex: 5000" value={d.montant} onChange={(e) => updateDepense(d.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-rose-200 rounded-lg text-sm font-bold text-rose-700 outline-none" />
+                      <input type="number" placeholder="Ex: 5000" value={d.montant} onChange={(e) => updateDepense(d.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-rose-200 rounded-lg text-sm font-bold text-rose-700 outline-none focus:border-rose-500" />
+                    </div>
+                    <div className="sm:col-span-2">
+                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails de la dépense</label>
+                       <input type="text" placeholder="Précisez (ex: nom du garage, type de pièce)..." value={d.detail || ''} onChange={e => updateDepense(d.id, 'detail', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-rose-500" />
                     </div>
                   </div>
                 </div>
@@ -697,9 +700,17 @@ export default function App() {
                   <div>
                     <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b pb-1">1. Recettes</h4>
                     {formData.recettes.map(r => (
-                      <div key={r.id} className="flex justify-between items-center text-sm py-1">
-                        <span className="font-medium">{r.vehicule === 'Autre...' ? r.detail : r.vehicule}</span>
-                        <span className="font-bold">{formatArgent(r.montant)} F</span>
+                      <div key={r.id} className="flex justify-between items-start text-sm py-1.5 border-b border-slate-50 last:border-0">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-slate-800">{r.vehicule || 'Véhicule non précisé'}</span>
+                          {(r.motif !== 'Recette normale' || r.justification) && (
+                            <span className="text-[10px] text-slate-500 mt-0.5">
+                              {r.motif !== 'Recette normale' && <span className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded mr-1">{r.motif}</span>}
+                              {r.justification}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-bold whitespace-nowrap ml-2">{formatArgent(r.montant)} F</span>
                       </div>
                     ))}
                     <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t font-bold text-emerald-600">
@@ -712,9 +723,12 @@ export default function App() {
                     <div>
                       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b pb-1">2. Dépenses</h4>
                       {formData.depenses.map(d => (
-                        <div key={d.id} className="flex justify-between items-center text-sm py-1 text-slate-600">
-                          <span>{d.type === 'Autre...' ? d.detail : d.type}</span>
-                          <span className="font-bold text-rose-500">-{formatArgent(d.montant)} F</span>
+                        <div key={d.id} className="flex justify-between items-start text-sm py-1.5 text-slate-600 border-b border-slate-50 last:border-0">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{d.type === 'Autre...' ? (d.customType || 'Autre') : d.type}</span>
+                            {d.detail && <span className="text-[10px] text-slate-400 mt-0.5">{d.detail}</span>}
+                          </div>
+                          <span className="font-bold text-rose-500 whitespace-nowrap ml-2">-{formatArgent(d.montant)} F</span>
                         </div>
                       ))}
                       <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t font-bold text-rose-600">
