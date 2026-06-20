@@ -5,15 +5,16 @@ import {
   X, AlertTriangle, Car, Wallet, FileOutput, Loader2, UserPlus, 
   Users, Calendar, Paperclip, Share2, Printer, Clipboard, RotateCcw,
   Search, ShieldAlert, DollarSign, Send, ArrowRight, Eye, Layout,
-  Phone, Video, MoreVertical, CheckCheck, TrendingUp, Camera
+  Phone, Video, MoreVertical, CheckCheck, TrendingUp, Camera,
+  Banknote, Scale
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from "firebase/analytics";
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
 // --- Configuration Firebase Intégrée ---
-const firebaseConfig = {
+const defaultFirebaseConfig = {
   apiKey: "AIzaSyAZrIZAkt4EHRYxRZZ0sbaK1gGERcNplIY",
   authDomain: "rapport-vehicule-bd4c6.firebaseapp.com",
   databaseURL: "https://rapport-vehicule-bd4c6-default-rtdb.firebaseio.com",
@@ -24,12 +25,24 @@ const firebaseConfig = {
   measurementId: "G-PRXEN0M1KQ"
 };
 
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 const app = initializeApp(firebaseConfig);
-const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+
+// --- Safely initialize Analytics ---
+let analytics = null;
+try {
+  if (typeof window !== 'undefined') {
+    // We try to get Analytics, but we don't let it crash the app if it fails
+    analytics = getAnalytics(app);
+  }
+} catch (error) {
+  console.warn("Firebase Analytics failed to initialize. Skipping...", error);
+}
+
 const auth = getAuth(app);
 const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- Constantes & Données par défaut ---
 const LISTE_MOTIFS = [
   "RAS (Journée normale)", 
   "Journée au garage", 
@@ -40,16 +53,22 @@ const LISTE_MOTIFS = [
   "Autre..."
 ];
 
-const LISTE_DEPENSES = [
+const LISTE_DEPENSES_SORTIES = [
   "Carburant / Essence",
   "Lavage véhicule",
-  "Pièces auto (Cardans, Biellettes, etc.)", 
+  "Pièces auto / Garage", 
   "Main d'œuvre mécanicien", 
-  "Vidange moteur", 
-  "Pneus & parallélisme",
+  "Règlement ancienne dette fournisseur",
+  "Créance / Avance accordée",
   "Frais de route & péages",
   "Amendes & Contraventions",
-  "Autre..."
+  "Autre sortie..."
+];
+
+const LISTE_DEPENSES_ENTREES = [
+  "Remboursement reçu (Créance payée)",
+  "Avance client",
+  "Autre entrée d'argent"
 ];
 
 const LISTE_CATEGORIES_ALERTES = [
@@ -61,15 +80,8 @@ const LISTE_CATEGORIES_ALERTES = [
   "Autre problème administratif"
 ];
 
-// Valeurs par défaut pour débloquer la première utilisation
-const PROPRIETAIRES_PAR_DEFAUT = [
-  { id: 'prop-1', name: 'M. Koné', phone: '0708091011', company: 'Koné Transports' }
-];
-
-const VEHICULES_PAR_DEFAUT = [
-  "Suzuki blanche",
-  "Suzuki bleue"
-];
+const PROPRIETAIRES_PAR_DEFAUT = [];
+const VEHICULES_PAR_DEFAUT = [];
 
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return "0";
@@ -80,18 +92,18 @@ const formatAmount = (val) => {
 const INITIAL_FORM_STATE = {
   reportDate: new Date().toISOString().split('T')[0],
   reportType: 'Quotidien',
-  ownerId: 'prop-1',
-  vehicles: [
-    { id: 1, name: 'Suzuki blanche', amount: '', reason: 'RAS (Journée normale)', customReason: '' }
-  ],
+  ownerId: '',
+  vehicles: [],
   expenses: [],
   arrears: {
-    previous: '',
-    paid: '',    
-    reason: '',  
-    proofName: '',
-    proofImage: null, 
-    cashierName: '' 
+    previous: '',       // Ancienne dette (Arriéré passé)
+    arrierePaye: '',    // Montant remboursé sur l'ancienne dette
+    paid: '',           // Versement pour la recette du jour
+    cashOnHand: '',     // Espèces disponibles en caisse
+    reason: '',         // Note
+    proofName: '',      // Nom PJ
+    proofImage: null,   // Image PJ
+    cashierName: ''     // Nom caissier
   },
   alerts: [],
   customProblem: ''
@@ -126,7 +138,6 @@ export default function App() {
   const fileInputRef = useRef(null);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
-  // 1. Initialisation
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
@@ -152,17 +163,20 @@ export default function App() {
 
     const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
       } catch (error) {
         console.error("Erreur d'authentification:", error);
-        setFirebaseErrorMsg("Connexion Cloud impossible. Mode local activé.");
+        setFirebaseErrorMsg("Authentification Firebase bloquée. Sauvegarde locale activée.");
       }
     };
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, setUser);
     
-    // Chargement de l'historique local au démarrage
     const localHistory = localStorage.getItem('fleet_local_history');
     if (localHistory) {
       setHistory(JSON.parse(localHistory));
@@ -174,24 +188,19 @@ export default function App() {
     };
   }, []);
 
-  // 2. Synchronisation Firebase (Avec fusion locale)
   useEffect(() => {
     if (!user) return;
     try {
-      // Chemin standard corrigé !
-      const q = collection(db, 'users', user.uid, 'reports');
+      const q = collection(db, 'artifacts', appId, 'users', user.uid, 'reports');
       const unsubscribe = onSnapshot(q, 
         (snapshot) => {
           const fetchedReports = [];
           snapshot.forEach((doc) => fetchedReports.push({ id: doc.id, ...doc.data() }));
           
           setHistory(prevLocal => {
-            // Fusionner l'historique Firebase et Local sans doublons
             const merged = [...fetchedReports];
-            const firebaseIds = new Set(fetchedReports.map(r => r.id));
-            
             prevLocal.forEach(localItem => {
-              if (!firebaseIds.has(localItem.id)) {
+              if (!merged.find(m => m.id === localItem.id)) {
                 merged.push(localItem);
               }
             });
@@ -208,7 +217,6 @@ export default function App() {
     }
   }, [user]);
 
-  // 3. Récupération des listes personnalisées
   useEffect(() => {
     const savedOwners = localStorage.getItem('fleet_owners');
     const savedVehicles = localStorage.getItem('fleet_vehicles');
@@ -234,11 +242,10 @@ export default function App() {
   const resetForm = () => {
     setFormData({
       ...INITIAL_FORM_STATE,
-      reportDate: new Date().toISOString().split('T')[0],
-      ownerId: owners.length > 0 ? owners[0].id : 'prop-1'
+      ownerId: owners.length > 0 ? owners[0].id : ''
     });
     setEditingId(null);
-    showToast("📝 Nouveau formulaire vierge prêt !");
+    showToast("📝 Nouveau formulaire prêt");
   };
 
   const saveToLocalHistory = (dataToSave) => {
@@ -254,44 +261,39 @@ export default function App() {
     });
   };
 
-  // --- NOUVELLE FONCTION DE SAUVEGARDE SANS RESET ---
   const saveToHistory = async () => {
     if (owners.length === 0 || !formData.ownerId) {
       showToast('⚠️ Vous devez sélectionner un propriétaire !');
       return;
     }
 
-    const dataToSave = { ...formData, updatedAt: new Date().toISOString() };
+    const dataToSave = { ...formData, id: editingId || Date.now().toString(), updatedAt: new Date().toISOString() };
     if (!editingId) dataToSave.createdAt = new Date().toISOString();
 
     if (!user) {
-      // Sauvegarde Hors-Ligne
-      dataToSave.id = editingId || Date.now().toString();
       saveToLocalHistory(dataToSave);
-      setEditingId(dataToSave.id); // On passe en mode "édition" pour ne pas créer de doublons si on reclique
-      showToast('📌 Rapport sauvegardé localement (Hors-ligne)');
+      showToast('📌 Sauvegardé localement (Hors-ligne)');
+      resetForm();
+      setActiveTab('history');
       return;
     }
     
     try {
       if (editingId) {
-        // Mise à jour Cloud
-        await setDoc(doc(db, 'users', user.uid, 'reports', editingId), dataToSave, { merge: true });
-        showToast('📌 Rapport mis à jour avec succès (Cloud) !');
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reports', editingId), dataToSave, { merge: true });
+        showToast('📌 Rapport mis à jour (Cloud)');
       } else {
-        // Création Cloud
-        const docRef = await addDoc(collection(db, 'users', user.uid, 'reports'), dataToSave);
-        setEditingId(docRef.id); // L'ID firebase est affecté au formulaire courant
-        showToast('📌 Nouveau rapport enregistré (Cloud) !');
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'reports'), dataToSave);
+        showToast('📌 Nouveau rapport enregistré (Cloud)');
       }
-      // NOTE IMPORTANTE: On NE FAIT PLUS "resetForm()" ici. 
-      // Le rapport reste à l'écran pour que l'utilisateur aille dans "Aperçu".
+      resetForm();
+      setActiveTab('history');
     } catch (error) {
       console.error("Firebase a bloqué, sauvegarde locale...", error);
-      dataToSave.id = editingId || Date.now().toString();
       saveToLocalHistory(dataToSave);
-      setEditingId(dataToSave.id);
-      showToast('📌 Sauvegardé localement (Permission Cloud refusée)');
+      showToast('📌 Sauvegardé localement (Permission Firebase refusée)');
+      resetForm();
+      setActiveTab('history');
     }
   };
 
@@ -303,7 +305,7 @@ export default function App() {
       ownerId: item.ownerId || (owners.length > 0 ? owners[0].id : ''),
       vehicles: item.vehicles || [],
       expenses: item.expenses || [],
-      arrears: item.arrears || { previous: '', paid: '', reason: '', proofName: '', proofImage: null, cashierName: '' },
+      arrears: item.arrears || { previous: '', arrierePaye: '', paid: '', reason: '', proofName: '', proofImage: null, cashierName: '', cashOnHand: '' },
       alerts: item.alerts || [],
       customProblem: item.customProblem || ''
     });
@@ -312,46 +314,43 @@ export default function App() {
   };
 
   const duplicateReport = (item) => {
-    setEditingId(null); // Force a new ID
+    setEditingId(null);
     setFormData({
       reportDate: new Date().toISOString().split('T')[0],
       reportType: item.reportType,
       ownerId: item.ownerId,
       vehicles: item.vehicles.map(v => ({ ...v, id: Math.random() })),
       expenses: item.expenses.map(e => ({ ...e, id: Math.random() })),
-      arrears: { ...item.arrears, paid: '', proofName: '', proofImage: null },
+      arrears: { ...item.arrears, paid: '', arrierePaye: '', proofName: '', proofImage: null },
       alerts: item.alerts || [],
       customProblem: item.customProblem || ''
     });
     setActiveTab('form');
-    showToast('📋 Rapport copié. Modifiez-le puis Sauvegardez.');
+    showToast('📋 Rapport dupliqué');
   };
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
     
-    // Tenter suppression Cloud
     if (user) {
       try {
-        await deleteDoc(doc(db, 'users', user.uid, 'reports', itemToDelete));
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reports', itemToDelete));
       } catch (e) {
         console.error("Erreur Firebase delete", e);
       }
     }
     
-    // Forcer suppression locale
     setHistory(prev => {
       const newHistory = prev.filter(item => item.id !== itemToDelete);
       localStorage.setItem('fleet_local_history', JSON.stringify(newHistory));
       return newHistory;
     });
 
-    showToast('🗑️ Rapport supprimé définitivement');
+    showToast('🗑️ Rapport supprimé');
     if (editingId === itemToDelete) resetForm();
     setItemToDelete(null);
   };
 
-  // --- GESTION PROPRIÉTAIRES ---
   const handleSaveOwner = (e) => {
     e.preventDefault();
     if (!newOwner.name.trim()) return;
@@ -360,7 +359,7 @@ export default function App() {
       const updated = owners.map(o => o.id === editingOwnerId ? { ...o, ...newOwner } : o);
       saveOwnersToLocal(updated);
       setEditingOwnerId(null);
-      showToast('🏢 Propriétaire modifié');
+      showToast('🏢 Propriétaire modifié avec succès');
     } else {
       const newO = { id: `prop-${Date.now()}`, ...newOwner };
       const updated = [...owners, newO];
@@ -383,7 +382,6 @@ export default function App() {
     setEditingOwnerId(o.id);
   };
 
-  // --- GESTION VÉHICULES ---
   const handleSaveVehicleOption = (e) => {
     e.preventDefault();
     if (!newVehicleName.trim()) return;
@@ -393,7 +391,7 @@ export default function App() {
       updated[editingVehicleIndex] = newVehicleName.trim();
       saveVehiclesToLocal(updated);
       setEditingVehicleIndex(null);
-      showToast('🚗 Véhicule modifié');
+      showToast('🚗 Véhicule modifié avec succès');
     } else {
       const updated = [...availableVehicles, newVehicleName.trim()];
       saveVehiclesToLocal(updated);
@@ -413,7 +411,6 @@ export default function App() {
     setEditingVehicleIndex(index);
   };
 
-  // --- PHOTO ---
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -454,7 +451,6 @@ export default function App() {
     updateArrears('proofName', '');
   };
 
-  // --- UPDATES FORMULAIRE ---
   const updateForm = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
   
   const updateVehicle = (id, field, value) => {
@@ -463,7 +459,7 @@ export default function App() {
   };
   const addVehicle = () => {
     if (availableVehicles.length === 0) {
-      showToast('⚠️ Vous devez d\'abord ajouter un véhicule dans "Gérer Véhicules".');
+      showToast('⚠️ Vous devez d\'abord ajouter un véhicule à votre flotte.');
       setIsVehicleModalOpen(true);
       return;
     }
@@ -480,20 +476,20 @@ export default function App() {
   };
   const addExpense = () => {
     if (availableVehicles.length === 0) {
-      showToast('⚠️ Vous devez d\'abord ajouter un véhicule.');
+      showToast('⚠️ Vous devez d\'abord ajouter un véhicule à votre flotte.');
       setIsVehicleModalOpen(true);
       return;
     }
     updateForm('expenses', [
       ...formData.expenses, 
-      { id: Date.now(), vehicleName: availableVehicles[0], description: LISTE_DEPENSES[0], customDescription: '', amount: '' }
+      { id: Date.now(), vehicleName: availableVehicles[0], transactionType: 'Sortie', description: LISTE_DEPENSES_SORTIES[0], customDescription: '', amount: '' }
     ]);
   };
   const removeExpense = (id) => updateForm('expenses', formData.expenses.filter(e => e.id !== id));
 
   const addAlert = () => {
     if (availableVehicles.length === 0) {
-      showToast('⚠️ Vous devez d\'abord ajouter un véhicule.');
+      showToast('⚠️ Vous devez d\'abord ajouter un véhicule à votre flotte.');
       setIsVehicleModalOpen(true);
       return;
     }
@@ -510,21 +506,53 @@ export default function App() {
 
   const updateArrears = (field, value) => updateForm('arrears', { ...formData.arrears, [field]: value });
 
-  // --- CALCULS FINANCIERS ---
   const totalRecette = useMemo(() => formData.vehicles.reduce((sum, v) => sum + (parseFloat(v.amount) || 0), 0), [formData.vehicles]);
-  const totalExpenses = useMemo(() => formData.expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0), [formData.expenses]);
-  const soldeDuJour = totalRecette - totalExpenses;
+  
+  // Différenciation des Dépenses (Sorties) et Créances remboursées (Entrées)
+  const totalSorties = useMemo(() => formData.expenses.filter(e => e.transactionType === 'Sortie' || !e.transactionType).reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0), [formData.expenses]);
+  const totalEntrees = useMemo(() => formData.expenses.filter(e => e.transactionType === 'Entrée').reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0), [formData.expenses]);
+  
+  // Solde Net du Jour
+  const soldeDuJour = totalRecette + totalEntrees - totalSorties;
 
   const arrearsCalculated = useMemo(() => {
-    const previous = parseFloat(formData.arrears.previous) || 0;
-    const paid = parseFloat(formData.arrears.paid) || 0; 
-    const totalDetteDûe = previous + soldeDuJour;
-    const resteDette = totalDetteDûe - paid;
-    return { totalDetteDûe, resteDette, soldeDuJour };
-  }, [formData.arrears.previous, formData.arrears.paid, soldeDuJour]);
+    const previous = parseFloat(formData.arrears.previous) || 0;         // Ancienne Dette
+    const arrierePaye = parseFloat(formData.arrears.arrierePaye) || 0;   // Remboursement sur l'ancienne dette
+    const paidToday = parseFloat(formData.arrears.paid) || 0;            // Versement pour le jour
+    const cash = parseFloat(formData.arrears.cashOnHand);                // Espèces en caisse
+
+    // 1. Écart de caisse (Théorique vs Physique)
+    const ecart = !isNaN(cash) ? cash - soldeDuJour : null;
+    
+    // 2. Reste impayé sur le jour (Ce qu'on aurait dû verser - ce qu'on a versé)
+    const missingToday = soldeDuJour - paidToday;
+    
+    // 3. Dette passée restante (Ancienne dette - Remboursement effectué)
+    const remainingPrevious = previous - arrierePaye;
+    
+    // 4. Nouvel Arriéré Total (Dette restante + Impayé du jour)
+    const nouvelArriereTotal = remainingPrevious + missingToday;
+
+    // 5. Total de l'argent remis au propriétaire aujourd'hui (Versement Jour + Remboursement Dette)
+    const totalRemis = paidToday + arrierePaye;
+
+    return { 
+      previous,
+      arrierePaye,
+      paidToday,
+      missingToday,
+      remainingPrevious,
+      nouvelArriereTotal,
+      totalRemis,
+      ecart,
+      soldeDuJour,
+      totalSorties,
+      totalEntrees
+    };
+  }, [formData.arrears, soldeDuJour, totalSorties, totalEntrees]);
 
   const activeOwnerObj = useMemo(() => {
-    return owners.find(o => o.id === formData.ownerId) || null;
+    return owners.find(o => o.id === formData.ownerId) || owners[0] || null;
   }, [formData.ownerId, owners]);
 
   const generateWhatsAppText = () => {
@@ -547,38 +575,49 @@ export default function App() {
     text += `\n💵 *TOTAL RECETTE :* ${formatAmount(totalRecette)} FCFA\n`;
     text += `───────────────────\n\n`;
 
-    text += `💸 *2. DÉPENSES & SOLDE*\n`;
+    text += `💸 *2. OPÉRATIONS (ENTRÉES / SORTIES)*\n`;
     if (d.expenses.length > 0) {
       d.expenses.forEach(e => {
-        const desc = e.description === 'Autre...' ? e.customDescription : e.description;
-        text += `• ${e.vehicleName} - ${desc} : *${formatAmount(e.amount)} FCFA*\n`;
+        const desc = (e.description === 'Autre sortie...' || e.description === "Autre entrée d'argent") ? e.customDescription : e.description;
+        const isSortie = e.transactionType === 'Sortie' || !e.transactionType;
+        text += `• ${e.vehicleName} - ${desc} : *${isSortie ? '-' : '+'}${formatAmount(e.amount)} FCFA*\n`;
       });
-      text += `\n🔻 *Total Dépenses :* ${formatAmount(totalExpenses)} FCFA\n`;
+      text += `\n🔻 *Total Sorties :* ${formatAmount(arrearsCalculated.totalSorties)} FCFA\n`;
+      if (arrearsCalculated.totalEntrees > 0) {
+        text += `🟢 *Total Entrées annexes :* +${formatAmount(arrearsCalculated.totalEntrees)} FCFA\n`;
+      }
     } else {
-      text += `\n_Aucune dépense enregistrée ce jour._\n`;
-      text += `🔻 *Total Dépenses :* 0 FCFA\n`;
+      text += `\n_Aucune opération enregistrée ce jour._\n`;
     }
     
-    text += `\n💰 *SOLDE DU JOUR :* *${formatAmount(arrearsCalculated.soldeDuJour)} FCFA*\n`;
-    text += `_(Recette totale - Dépenses)_\n`;
+    text += `\n💰 *SOLDE NET DU JOUR :* *${formatAmount(arrearsCalculated.soldeDuJour)} FCFA*\n`;
+    text += `_(Recettes + Entrées - Sorties)_\n`;
     text += `───────────────────\n\n`;
 
-    text += `🧾 *3. VERSEMENT CAISSE & ARRIÉRÉS*\n`;
-    text += `• Ancien arriéré : ${formatAmount(d.arrears.previous)} FCFA\n`;
-    text += `• Total attendu (Solde + Arriéré) : ${formatAmount(arrearsCalculated.totalDetteDûe)} FCFA\n`;
-    text += `\n💵 *Versement effectué :* *${formatAmount(d.arrears.paid)} FCFA*\n`;
+    text += `🧾 *3. CAISSE & COMPTE PROPRIÉTAIRE*\n\n`;
     
-    if (d.arrears.cashierName) {
-      text += `👤 _Reçu en caisse par : ${d.arrears.cashierName}_\n`;
+    if (arrearsCalculated.ecart !== null) {
+      text += `📊 _Caisse Physique :_\n`;
+      text += `• Espèces disponibles : ${formatAmount(d.arrears.cashOnHand)} FCFA\n`;
+      text += `• Écart constaté : *${arrearsCalculated.ecart >= 0 ? '+' : ''}${formatAmount(arrearsCalculated.ecart)} FCFA*\n\n`;
     }
-    if (d.arrears.reason) {
-      text += `📝 _Note : ${d.arrears.reason}_\n`;
-    }
-    if (d.arrears.proofImage) {
-      text += `📎 _Preuve en image disponible dans la fiche PDF/Image_\n`;
+
+    text += `🤝 _Versements du Jour :_\n`;
+    text += `• Versement pour la recette du jour : *${formatAmount(arrearsCalculated.paidToday)} FCFA*\n`;
+    text += `• Reste impayé sur le jour : ${formatAmount(arrearsCalculated.missingToday)} FCFA\n\n`;
+
+    text += `🔄 _Suivi de la Dette (Arriérés) :_\n`;
+    text += `• Ancien Arriéré (Dette passée) : ${formatAmount(arrearsCalculated.previous)} FCFA\n`;
+    text += `• Remboursement dette ce jour : *${formatAmount(arrearsCalculated.arrierePaye)} FCFA*\n`;
+    
+    if (d.arrears.cashierName || d.arrears.reason) {
+      text += `\n📝 _Détails du paiement :_\n`;
+      if (d.arrears.cashierName) text += `👤 Reçu par : ${d.arrears.cashierName}\n`;
+      if (d.arrears.reason) text += `Note : ${d.arrears.reason}\n`;
     }
     
-    text += `\n📌 *RESTE DÛ AU PROPRIÉTAIRE :* *${formatAmount(arrearsCalculated.resteDette)} FCFA*\n`;
+    text += `\n📌 *NOUVEL ARRIÉRÉ TOTAL (Reste Dû final) :* *${formatAmount(arrearsCalculated.nouvelArriereTotal)} FCFA*\n`;
+    text += `_(Dette restante + Impayé du jour)_\n`;
     text += `───────────────────\n\n`;
 
     if (d.alerts.length > 0 || d.customProblem.trim()) {
@@ -593,7 +632,7 @@ export default function App() {
       text += `✨ *4. ALERTES :* RAS (Aucune alerte)\n`;
     }
     
-    text += `\n🚀 _Généré par Rapport Véhicule_`;
+    text += `\n🚀 _Généré par Rapport Véhicule Pro_`;
     return text;
   };
 
@@ -693,19 +732,19 @@ export default function App() {
       
       if (line.includes('📁') || line.includes('🏢') || line.includes('📅')) {
         textClass = "text-slate-700 font-medium";
-      } else if (line.includes('💰') || line.includes('TOTAL RECETTE') || line.includes('SOLDE DU JOUR')) {
+      } else if (line.includes('💰') || line.includes('TOTAL RECETTE') || line.includes('SOLDE NET DU JOUR')) {
         textClass = "text-emerald-700 font-bold";
         containerClass += " mt-1";
-      } else if (line.includes('💸') || line.includes('Total Dépenses') || line.includes('🔻')) {
+      } else if (line.includes('💸') || line.includes('Total Sorties') || line.includes('🔻')) {
         textClass = "text-rose-700 font-bold";
         containerClass += " mt-1";
-      } else if (line.includes('🧾') || line.includes('RESTE DÛ') || line.includes('📌') || line.includes('Versement effectué')) {
+      } else if (line.includes('🧾') || line.includes('NOUVEL ARRIÉRÉ') || line.includes('📌') || line.includes('Versement')) {
         textClass = "text-purple-700 font-bold";
         containerClass += " mt-1";
       } else if (line.includes('⚠️') || line.includes('ALERTES')) {
         textClass = "text-amber-700 font-bold";
         containerClass += " mt-1";
-      } else if (line.includes('✨')) {
+      } else if (line.includes('✨') || line.includes('🟢')) {
         textClass = "text-teal-700 font-bold";
         containerClass += " mt-1";
       } else if (line.startsWith('•') || line.match(/^\d+\./)) {
@@ -734,6 +773,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#faf8f5] font-sans text-slate-800 pb-20 lg:pb-8 flex flex-col">
       
+      {/* Alertes, Toasts, Modales suppression et gestion propriétaires/véhicules */}
       {toast && (
         <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl z-50 font-bold border-2 border-slate-700 flex items-center gap-2 text-sm whitespace-nowrap">
            <AlertCircle size={16} className="text-amber-400"/> {toast}
@@ -757,7 +797,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- MODALE GESTION PROPRIÉTAIRES --- */}
       {isOwnerModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#eff6ff] rounded-2xl shadow-xl max-w-md w-full p-6 border-4 border-blue-400 relative flex flex-col max-h-[90vh]">
@@ -815,7 +854,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- MODALE GESTION VÉHICULES --- */}
       {isVehicleModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#fdf2f8] rounded-2xl shadow-xl max-w-sm w-full p-6 border-4 border-pink-400 relative flex flex-col max-h-[90vh]">
@@ -860,7 +898,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- HEADER --- */}
+      {/* HEADER PRINCIPAL */}
       <header className="bg-gradient-to-r from-amber-700 to-amber-900 text-white shadow-lg sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
@@ -891,6 +929,7 @@ export default function App() {
         {/* --- COLONNE GAUCHE (FORMULAIRE) --- */}
         <div className={`w-full lg:w-[55%] xl:w-[60%] flex flex-col gap-6 ${activeTab !== 'form' && activeTab !== 'preview' ? 'lg:hidden hidden' : (activeTab === 'preview' ? 'hidden lg:flex' : 'flex')}`}>
           
+          {}
           {activeTab === 'form' && (
             <div className="space-y-8 animate-in fade-in duration-300">
               
@@ -938,6 +977,7 @@ export default function App() {
                 </div>
               </div>
 
+              {}
               <div className="bg-[#fef9c3] p-6 rounded-3xl border-2 border-yellow-200 relative shadow-[5px_5px_0px_0px_rgba(254,240,138,1)] transform hover:-rotate-1 transition-transform">
                 <div className="absolute -top-4 left-1/3 w-20 h-6 bg-white/55 backdrop-blur-sm -rotate-3 border-x border-dashed border-yellow-300"></div>
 
@@ -964,7 +1004,7 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-[10px] uppercase font-bold text-yellow-800 mb-0.5 block">Montant (FCFA)</label>
+                          <label className="text-[10px] uppercase font-bold text-yellow-800 mb-0.5 block">Montant Recette (FCFA)</label>
                           <div className="relative">
                             <input type="number" placeholder="Ex: 15000" value={v.amount} onChange={(e) => updateVehicle(v.id, 'amount', e.target.value)} className="w-full p-2 bg-yellow-50/50 border border-yellow-200 rounded-xl outline-none text-xs font-bold text-emerald-700 pr-10" />
                             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-yellow-600">FCFA</span>
@@ -989,22 +1029,35 @@ export default function App() {
                 </div>
               </div>
 
+              {}
               <div className="bg-[#dcfce7] p-6 rounded-3xl border-2 border-green-200 relative shadow-[5px_5px_0px_0px_rgba(187,247,208,1)] transform hover:rotate-1 transition-transform">
                 <div className="absolute -top-4 right-1/4 w-20 h-6 bg-white/55 backdrop-blur-sm rotate-3 border-x border-dashed border-green-300"></div>
 
                 <div className="flex justify-between items-center mb-4 border-b-2 border-dashed border-green-300 pb-3">
-                  <h3 className="font-bold text-green-950 flex items-center gap-2"><DollarSign size={18}/> 2. Dépenses du Jour</h3>
-                  <span className="text-[10px] sm:text-xs font-bold text-green-800 bg-green-200/50 px-2 py-1 rounded-lg">Total : {formatAmount(totalExpenses)} F</span>
+                  <h3 className="font-bold text-green-950 flex items-center gap-2"><DollarSign size={18}/> 2. Opérations Financières</h3>
+                  <span className="text-[10px] sm:text-xs font-bold text-green-800 bg-green-200/50 px-2 py-1 rounded-lg">Sorties : {formatAmount(arrearsCalculated.totalSorties)} F</span>
                 </div>
 
                 <div className="space-y-4">
                   {formData.expenses.map((e) => (
                     <div key={e.id} className="p-4 bg-white/75 rounded-2xl border border-green-200 shadow-sm relative">
-                      <button onClick={() => removeExpense(e.id)} className="absolute top-2 right-2 p-1.5 bg-white hover:bg-red-50 text-red-500 rounded-full border border-red-100 transition-colors">
+                      <button onClick={() => removeExpense(e.id)} className="absolute top-2 right-2 p-1.5 bg-white hover:bg-red-50 text-red-500 rounded-full border border-red-100 transition-colors z-10">
                         <Trash2 size={13} />
                       </button>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pr-6">
+                        {/* Sélecteur Type de Transaction */}
+                        <div className="md:col-span-2 flex gap-4 border-b border-green-100 pb-3 mb-1">
+                          <label className="flex items-center gap-1.5 text-xs font-bold cursor-pointer">
+                            <input type="radio" name={`type-${e.id}`} checked={e.transactionType === 'Sortie' || !e.transactionType} onChange={() => {updateExpense(e.id, 'transactionType', 'Sortie'); updateExpense(e.id, 'description', LISTE_DEPENSES_SORTIES[0]);}} className="accent-red-500 w-4 h-4" />
+                            <span className="text-red-700">Sortie (Dépense / Prêt)</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs font-bold cursor-pointer">
+                            <input type="radio" name={`type-${e.id}`} checked={e.transactionType === 'Entrée'} onChange={() => {updateExpense(e.id, 'transactionType', 'Entrée'); updateExpense(e.id, 'description', LISTE_DEPENSES_ENTREES[0]);}} className="accent-emerald-500 w-4 h-4" />
+                            <span className="text-emerald-700">Entrée (Remboursement)</span>
+                          </label>
+                        </div>
+
                         <div>
                           <label className="text-[10px] uppercase font-bold text-green-800 mb-0.5 block">Véhicule concerné</label>
                           <select value={e.vehicleName} onChange={(ev) => updateExpense(e.id, 'vehicleName', ev.target.value)} className="w-full p-2 bg-green-50/50 border border-green-200 rounded-xl outline-none text-xs text-green-950">
@@ -1012,19 +1065,19 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-[10px] uppercase font-bold text-green-800 mb-0.5 block">Montant dépensé</label>
+                          <label className="text-[10px] uppercase font-bold text-green-800 mb-0.5 block">Montant</label>
                           <div className="relative">
                             <input type="number" placeholder="Ex: 5000" value={e.amount} onChange={(ev) => updateExpense(e.id, 'amount', ev.target.value)} className="w-full p-2 bg-green-50/50 border border-green-200 rounded-xl outline-none text-xs font-bold text-green-700 pr-10" />
                             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-green-600">FCFA</span>
                           </div>
                         </div>
                         <div className="md:col-span-2">
-                          <label className="text-[10px] uppercase font-bold text-green-800 mb-0.5 block">Nature de la dépense</label>
+                          <label className="text-[10px] uppercase font-bold text-green-800 mb-0.5 block">Nature de l'opération</label>
                           <select value={e.description} onChange={(ev) => updateExpense(e.id, 'description', ev.target.value)} className="w-full p-2 bg-green-50/50 border border-green-200 rounded-xl outline-none text-xs text-green-900">
-                            {LISTE_DEPENSES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            {(e.transactionType === 'Entrée' ? LISTE_DEPENSES_ENTREES : LISTE_DEPENSES_SORTIES).map(opt => <option key={opt} value={opt}>{opt}</option>)}
                           </select>
-                          {e.description === 'Autre...' && (
-                            <input type="text" placeholder="Précisez la dépense..." value={e.customDescription} onChange={(ev) => updateExpense(e.id, 'customDescription', ev.target.value)} className="w-full p-2 mt-1.5 bg-green-50 border border-green-200 rounded-lg outline-none text-xs" />
+                          {(e.description === 'Autre sortie...' || e.description === "Autre entrée d'argent") && (
+                            <input type="text" placeholder="Précisez la nature..." value={e.customDescription} onChange={(ev) => updateExpense(e.id, 'customDescription', ev.target.value)} className="w-full p-2 mt-1.5 bg-green-50 border border-green-200 rounded-lg outline-none text-xs" />
                           )}
                         </div>
                       </div>
@@ -1032,54 +1085,100 @@ export default function App() {
                   ))}
 
                   <button onClick={addExpense} className="w-full py-2.5 rounded-2xl border-2 border-dashed border-green-400 text-green-700 font-bold text-sm flex items-center justify-center gap-2 hover:bg-green-100 transition-all">
-                    <Plus size={16}/> Ajouter une Dépense
+                    <Plus size={16}/> Ajouter une Opération (Dépense/Créance)
                   </button>
                 </div>
               </div>
 
+              {}
               <div className="bg-[#f3e8ff] p-6 rounded-3xl border-2 border-purple-200 relative shadow-[5px_5px_0px_0px_rgba(233,213,255,1)] transform hover:-rotate-1 transition-transform">
                 <div className="absolute -top-4 left-1/4 w-20 h-6 bg-white/55 backdrop-blur-sm -rotate-2 border-x border-dashed border-purple-300"></div>
 
                 <div className="flex justify-between items-center mb-4 border-b-2 border-dashed border-purple-300 pb-3">
-                  <h3 className="font-bold text-purple-950 flex items-center gap-2"><Clipboard size={18}/> 3. Bilan & Versement Caisse</h3>
-                  <span className="text-[10px] sm:text-xs font-bold text-purple-800 bg-purple-200/50 px-2 py-1 rounded-lg">Reste dû : {formatAmount(arrearsCalculated.resteDette)} F</span>
+                  <h3 className="font-bold text-purple-950 flex items-center gap-2"><Clipboard size={18}/> 3. Caisse & Compte Propriétaire</h3>
                 </div>
 
-                <div className="bg-white/60 p-3 rounded-xl border border-purple-100 mb-5 flex justify-between items-center shadow-sm">
-                  <span className="text-xs font-bold text-purple-800">Solde du Jour (Recette - Dépenses) :</span>
-                  <span className="text-sm font-black text-purple-700 bg-purple-100 px-3 py-1 rounded-lg">{formatAmount(arrearsCalculated.soldeDuJour)} FCFA</span>
-                </div>
+                {/* Bloc A: Caisse Physique */}
+                <div className="bg-white/80 p-4 rounded-2xl border border-purple-200 shadow-sm mb-6">
+                  <h4 className="text-xs font-bold text-purple-800 mb-3 flex items-center gap-1.5 uppercase tracking-wider"><Banknote size={14}/> A. Contrôle de la Caisse</h4>
+                  
+                  <div className="flex justify-between items-center bg-purple-50 p-2.5 rounded-xl border border-purple-100 mb-3">
+                    <span className="text-xs font-bold text-purple-800">Solde Net Attendu (Recettes - Dépenses) :</span>
+                    <span className="text-sm font-black text-purple-700 bg-white px-2 py-1 rounded-lg border border-purple-100">{formatAmount(arrearsCalculated.soldeDuJour)} FCFA</span>
+                  </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label className="text-[10px] uppercase font-bold text-purple-800 mb-0.5 block">Ancien Arriéré (Dette d'hier)</label>
+                    <label className="text-[10px] uppercase font-bold text-purple-800 mb-0.5 block">Espèces disponibles en caisse (Argent Physique compté)</label>
                     <div className="relative">
-                      <input type="number" placeholder="0" value={formData.arrears.previous} onChange={e => updateArrears('previous', e.target.value)} className="w-full p-2.5 bg-white border-2 border-purple-200 rounded-xl focus:border-purple-500 outline-none text-sm text-purple-900 pr-12 font-bold" />
+                      <input type="number" placeholder="Ex: 50000" value={formData.arrears.cashOnHand} onChange={e => updateArrears('cashOnHand', e.target.value)} className="w-full p-2.5 bg-white border-2 border-purple-200 rounded-xl focus:border-purple-500 outline-none text-sm text-purple-900 pr-12 font-bold" />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-purple-600">FCFA</span>
                     </div>
+                    {arrearsCalculated.ecart !== null && (
+                      <div className={`mt-2 p-2 rounded-xl text-xs font-bold border flex justify-between items-center ${arrearsCalculated.ecart >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                        <span>Écart constaté :</span>
+                        <span>{arrearsCalculated.ecart >= 0 ? '+' : ''}{formatAmount(arrearsCalculated.ecart)} FCFA</span>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <label className="text-[10px] uppercase font-bold text-purple-800 mb-0.5 block">Versement en caisse effectué</label>
+                </div>
+
+                {/* Bloc B: Versement & Arriérés */}
+                <div className="bg-white/80 p-4 rounded-2xl border border-purple-200 shadow-sm mb-4">
+                  <h4 className="text-xs font-bold text-purple-800 mb-3 flex items-center gap-1.5 uppercase tracking-wider"><Scale size={14}/> B. Opérations Propriétaire</h4>
+                  
+                  <div className="mb-4 bg-purple-50/50 p-3 rounded-xl border border-purple-100">
+                    <label className="text-[10px] uppercase font-bold text-purple-800 mb-0.5 block">1. Versement pour la Recette du Jour</label>
+                    <p className="text-[9px] text-purple-600 mb-1">Combien versez-vous aujourd'hui pour le travail de cette journée ?</p>
                     <div className="relative">
                       <input type="number" placeholder="0" value={formData.arrears.paid} onChange={e => updateArrears('paid', e.target.value)} className="w-full p-2.5 bg-emerald-50 border-2 border-emerald-300 rounded-xl focus:border-emerald-500 outline-none text-sm text-emerald-900 pr-12 font-bold" />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-emerald-600">FCFA</span>
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-1 gap-3 bg-orange-50/50 p-3 rounded-xl border border-orange-100">
+                    <div>
+                      <label className="text-[10px] uppercase font-bold text-orange-800 mb-0.5 block">2. Ancienne Dette (Arriérés d'hier)</label>
+                      <div className="relative">
+                        <input type="number" placeholder="0" value={formData.arrears.previous} onChange={e => updateArrears('previous', e.target.value)} className="w-full p-2 bg-white border border-orange-200 rounded-xl outline-none text-sm text-orange-900 pr-12 font-bold" />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-orange-600">FCFA</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase font-bold text-orange-800 mb-0.5 block">3. Remboursement sur cette ancienne dette</label>
+                      <div className="relative">
+                        <input type="number" placeholder="0" value={formData.arrears.arrierePaye} onChange={e => updateArrears('arrierePaye', e.target.value)} className="w-full p-2 bg-white border border-orange-200 rounded-xl outline-none text-sm text-emerald-700 pr-12 font-bold" />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-emerald-600">FCFA</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                {/* Résumé Final */}
+                <div className="bg-indigo-900 text-white p-4 rounded-2xl shadow-md">
+                  <div className="flex justify-between items-center text-xs text-indigo-200 mb-1">
+                    <span>Total remis aujourd'hui :</span>
+                    <span className="font-bold text-white">{formatAmount(arrearsCalculated.totalRemis)} FCFA</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm border-t border-indigo-700 pt-2 mt-2">
+                    <span className="font-bold uppercase tracking-wider text-[11px]">Nouvel Arriéré Total (Reste Dû) :</span>
+                    <span className="font-black text-lg text-amber-400">{formatAmount(arrearsCalculated.nouvelArriereTotal)} FCFA</span>
+                  </div>
+                </div>
+
+                {/* Détails Paiement */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="text-[10px] uppercase font-bold text-purple-800 mb-0.5 block">Reçu en caisse par (Nom)</label>
                     <input type="text" placeholder="Ex: Alice / M. Bamba" value={formData.arrears.cashierName || ''} onChange={e => updateArrears('cashierName', e.target.value)} className="w-full p-2.5 bg-white border-2 border-purple-200 rounded-xl focus:border-purple-500 outline-none text-sm text-purple-900 font-medium" />
                   </div>
                   <div>
                     <label className="text-[10px] uppercase font-bold text-purple-800 mb-0.5 block">Note sur le versement (Optionnel)</label>
-                    <input type="text" placeholder="Ex: Wave, Mobile Money..." value={formData.arrears.reason} onChange={e => updateArrears('reason', e.target.value)} className="w-full p-2.5 bg-white border-2 border-purple-200 rounded-xl focus:border-purple-500 outline-none text-sm text-purple-900" />
+                    <input type="text" placeholder="Ex: Wave, Espèces..." value={formData.arrears.reason} onChange={e => updateArrears('reason', e.target.value)} className="w-full p-2.5 bg-white border-2 border-purple-200 rounded-xl focus:border-purple-500 outline-none text-sm text-purple-900" />
                   </div>
                 </div>
 
                 <div className="mt-4">
-                  <label className="text-[10px] uppercase font-bold text-purple-800 mb-1.5 block">Preuve du versement (Photo)</label>
+                  <label className="text-[10px] uppercase font-bold text-purple-800 mb-1.5 block">Preuve de versement (Photo du reçu)</label>
                   
                   {!formData.arrears.proofImage ? (
                     <div>
@@ -1113,6 +1212,7 @@ export default function App() {
                 </div>
               </div>
 
+              {}
               <div className="bg-[#ffedd5] p-6 rounded-3xl border-2 border-orange-200 relative shadow-[5px_5px_0px_0px_rgba(253,186,116,1)] transform hover:rotate-1 transition-transform">
                 <div className="absolute -top-4 right-1/3 w-20 h-6 bg-white/55 backdrop-blur-sm rotate-2 border-x border-dashed border-orange-300"></div>
 
@@ -1159,21 +1259,20 @@ export default function App() {
                 </div>
               </div>
 
-              {/* BARRE D'ACTIONS DU FORMULAIRE */}
               <div className="flex gap-3 pt-4 sticky bottom-4 z-10 lg:static lg:bg-transparent bg-[#faf8f5]/90 backdrop-blur-sm p-4 lg:p-0 rounded-2xl shadow-[0_-10px_15px_-3px_rgba(250,248,245,0.9)] lg:shadow-none">
                 <button onClick={resetForm} className="px-4 py-3 bg-white border-2 border-slate-300 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 shadow-sm">
                   <RotateCcw size={18} />
                   <span className="hidden sm:inline">Nouveau</span>
                 </button>
                 <button onClick={saveToHistory} className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2">
-                  <Save size={18} /> {editingId ? 'Mettre à jour' : 'Sauvegarder'}
+                  <Save size={18} /> {editingId ? 'Mettre à jour' : 'Sauvegarder et Terminer'}
                 </button>
               </div>
 
             </div>
           )}
 
-          {/* --- COLONNE GAUCHE (HISTORIQUE) --- */}
+          {}
           {activeTab === 'history' && (
             <div className="space-y-6 animate-in fade-in duration-300 pb-32 lg:pb-0">
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-4 justify-between items-center">
@@ -1243,7 +1342,7 @@ export default function App() {
 
         </div>
 
-        {/* --- COLONNE DROITE : APERÇU --- */}
+        {}
         <div className={`w-full lg:w-[45%] xl:w-[40%] flex-col gap-4 ${activeTab === 'preview' ? 'flex' : 'hidden lg:flex'}`}>
           <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden flex flex-col h-full lg:h-[calc(100vh-120px)] lg:sticky lg:top-24">
             
@@ -1351,26 +1450,27 @@ export default function App() {
 
                   <div className="space-y-4 mb-6">
                     <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <DollarSign size={14} className="text-emerald-500"/> 2. Dépenses & Solde
+                      <DollarSign size={14} className="text-emerald-500"/> 2. Opérations & Dépenses
                     </h5>
                     {formData.expenses.length > 0 ? (
                       <div className="space-y-2.5">
                         {formData.expenses.map((e) => {
-                          const desc = e.description === 'Autre...' ? e.customDescription : e.description;
+                          const desc = (e.description === 'Autre sortie...' || e.description === "Autre entrée d'argent") ? e.customDescription : e.description;
+                          const isSortie = e.transactionType === 'Sortie' || !e.transactionType;
                           return (
-                            <div key={e.id} className="bg-red-50/40 p-3 rounded-xl border border-red-100/50 flex justify-between items-center text-sm">
+                            <div key={e.id} className={`p-3 rounded-xl border flex justify-between items-center text-sm ${isSortie ? 'bg-red-50/40 border-red-100/50' : 'bg-emerald-50/40 border-emerald-100/50'}`}>
                               <span className="text-slate-600 font-medium whitespace-normal break-words pr-2">{e.vehicleName} - {desc}</span>
-                              <span className="font-bold text-red-600 shrink-0">- {formatAmount(e.amount)} F</span>
+                              <span className={`font-bold shrink-0 ${isSortie ? 'text-red-600' : 'text-emerald-600'}`}>{isSortie ? '-' : '+'} {formatAmount(e.amount)} F</span>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <p className="text-sm text-slate-400 italic pl-1">Aucune dépense signalée.</p>
+                      <p className="text-sm text-slate-400 italic pl-1">Aucune opération signalée.</p>
                     )}
 
                     <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex justify-between items-center text-sm font-bold mt-3 shadow-sm">
-                      <span className="text-slate-700">Solde généré ce jour :</span>
+                      <span className="text-slate-700">Solde Net du jour :</span>
                       <span className="text-lg text-slate-900">{formatAmount(arrearsCalculated.soldeDuJour)} FCFA</span>
                     </div>
                   </div>
@@ -1379,6 +1479,17 @@ export default function App() {
                     <h5 className="text-xs font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
                       <Clipboard size={14} className="text-indigo-600"/> 3. Bilan & Versement
                     </h5>
+                    
+                    {arrearsCalculated.ecart !== null && (
+                      <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm mb-3 flex justify-between items-center text-sm">
+                        <span className="font-medium text-slate-600">Espèces en caisse</span>
+                        <span className="font-bold text-slate-800">{formatAmount(formData.arrears.cashOnHand)} F</span>
+                        <span className={`font-bold text-xs px-2 py-1 rounded-md ${arrearsCalculated.ecart >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                          {arrearsCalculated.ecart >= 0 ? '+' : ''}{formatAmount(arrearsCalculated.ecart)}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm">
                         <span className="block text-xs text-slate-400 font-medium mb-1">Ancienne Dette</span>
@@ -1390,8 +1501,8 @@ export default function App() {
                       </div>
                       <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 col-span-2 flex flex-col justify-center shadow-sm">
                         <div className="flex justify-between items-center">
-                          <span className="block text-xs text-emerald-800 font-bold uppercase tracking-wider">Versement Caisse</span>
-                          <span className="font-bold text-emerald-700 text-lg">{formatAmount(formData.arrears.paid)} FCFA</span>
+                          <span className="block text-xs text-emerald-800 font-bold uppercase tracking-wider">Versement au Prop.</span>
+                          <span className="font-bold text-emerald-700 text-lg">{formatAmount(arrearsCalculated.totalRemis)} FCFA</span>
                         </div>
                         {(formData.arrears.cashierName || formData.arrears.reason) && (
                            <div className="mt-3 pt-3 border-t border-emerald-200 text-xs text-emerald-700 font-medium whitespace-normal break-words">
@@ -1403,8 +1514,8 @@ export default function App() {
                     </div>
 
                     <div className="border-t border-indigo-200 pt-4 flex justify-between items-center text-sm mt-3">
-                      <span className="font-bold text-indigo-950">Reste dû au propriétaire :</span>
-                      <span className="font-black text-indigo-700 text-xl">{formatAmount(arrearsCalculated.resteDette)} FCFA</span>
+                      <span className="font-bold text-indigo-950">Nouvel Arriéré Total (Reste Dû) :</span>
+                      <span className="font-black text-amber-500 text-xl">{formatAmount(arrearsCalculated.nouvelArriereTotal)} FCFA</span>
                     </div>
 
                     {formData.arrears.proofImage && (
@@ -1451,7 +1562,7 @@ export default function App() {
 
       </main>
 
-      {/* --- MENU NAVIGATION MOBILE --- */}
+      {}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around p-3 pb-safe z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
         <button onClick={() => setActiveTab('form')} className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'form' ? 'text-amber-600' : 'text-slate-400'}`}>
           <Edit size={20} /> <span className="text-[10px] font-bold">Édition</span>
