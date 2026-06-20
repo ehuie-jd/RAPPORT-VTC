@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #faf8f5;
+}
+
+/* Gère l'espace sécurisé en bas sur les iPhone récents */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
