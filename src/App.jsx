@@ -9,11 +9,11 @@ import {
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from "firebase/analytics";
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
 // --- Configuration Firebase Intégrée ---
-const defaultFirebaseConfig = {
+const firebaseConfig = {
   apiKey: "AIzaSyAZrIZAkt4EHRYxRZZ0sbaK1gGERcNplIY",
   authDomain: "rapport-vehicule-bd4c6.firebaseapp.com",
   databaseURL: "https://rapport-vehicule-bd4c6-default-rtdb.firebaseio.com",
@@ -24,12 +24,10 @@ const defaultFirebaseConfig = {
   measurementId: "G-PRXEN0M1KQ"
 };
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- Constantes & Données par défaut ---
 const LISTE_MOTIFS = [
@@ -63,9 +61,15 @@ const LISTE_CATEGORIES_ALERTES = [
   "Autre problème administratif"
 ];
 
-const PROPRIETAIRES_PAR_DEFAUT = [];
+// Valeurs par défaut pour débloquer la première utilisation
+const PROPRIETAIRES_PAR_DEFAUT = [
+  { id: 'prop-1', name: 'M. Koné', phone: '0708091011', company: 'Koné Transports' }
+];
 
-const VEHICULES_PAR_DEFAUT = [];
+const VEHICULES_PAR_DEFAUT = [
+  "Suzuki blanche",
+  "Suzuki bleue"
+];
 
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return "0";
@@ -76,15 +80,17 @@ const formatAmount = (val) => {
 const INITIAL_FORM_STATE = {
   reportDate: new Date().toISOString().split('T')[0],
   reportType: 'Quotidien',
-  ownerId: '',
-  vehicles: [],
+  ownerId: 'prop-1',
+  vehicles: [
+    { id: 1, name: 'Suzuki blanche', amount: '', reason: 'RAS (Journée normale)', customReason: '' }
+  ],
   expenses: [],
   arrears: {
     previous: '',
     paid: '',    
     reason: '',  
     proofName: '',
-    proofImage: null, // Image Base64
+    proofImage: null, 
     cashierName: '' 
   },
   alerts: [],
@@ -120,6 +126,7 @@ export default function App() {
   const fileInputRef = useRef(null);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
+  // 1. Initialisation
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
@@ -145,20 +152,17 @@ export default function App() {
 
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (error) {
         console.error("Erreur d'authentification:", error);
-        setFirebaseErrorMsg("Authentification Firebase bloquée. Sauvegarde locale activée.");
+        setFirebaseErrorMsg("Connexion Cloud impossible. Mode local activé.");
       }
     };
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, setUser);
     
+    // Chargement de l'historique local au démarrage
     const localHistory = localStorage.getItem('fleet_local_history');
     if (localHistory) {
       setHistory(JSON.parse(localHistory));
@@ -170,20 +174,24 @@ export default function App() {
     };
   }, []);
 
+  // 2. Synchronisation Firebase (Avec fusion locale)
   useEffect(() => {
     if (!user) return;
     try {
-      const q = collection(db, 'artifacts', appId, 'users', user.uid, 'reports');
+      // Chemin standard corrigé !
+      const q = collection(db, 'users', user.uid, 'reports');
       const unsubscribe = onSnapshot(q, 
         (snapshot) => {
           const fetchedReports = [];
           snapshot.forEach((doc) => fetchedReports.push({ id: doc.id, ...doc.data() }));
-          fetchedReports.sort((a, b) => new Date(b.reportDate).valueOf() - new Date(a.reportDate).valueOf());
           
           setHistory(prevLocal => {
+            // Fusionner l'historique Firebase et Local sans doublons
             const merged = [...fetchedReports];
+            const firebaseIds = new Set(fetchedReports.map(r => r.id));
+            
             prevLocal.forEach(localItem => {
-              if (!merged.find(m => m.id === localItem.id)) {
+              if (!firebaseIds.has(localItem.id)) {
                 merged.push(localItem);
               }
             });
@@ -200,6 +208,7 @@ export default function App() {
     }
   }, [user]);
 
+  // 3. Récupération des listes personnalisées
   useEffect(() => {
     const savedOwners = localStorage.getItem('fleet_owners');
     const savedVehicles = localStorage.getItem('fleet_vehicles');
@@ -225,10 +234,11 @@ export default function App() {
   const resetForm = () => {
     setFormData({
       ...INITIAL_FORM_STATE,
-      ownerId: owners.length > 0 ? owners[0].id : ''
+      reportDate: new Date().toISOString().split('T')[0],
+      ownerId: owners.length > 0 ? owners[0].id : 'prop-1'
     });
     setEditingId(null);
-    showToast("📝 Nouveau formulaire prêt");
+    showToast("📝 Nouveau formulaire vierge prêt !");
   };
 
   const saveToLocalHistory = (dataToSave) => {
@@ -244,39 +254,44 @@ export default function App() {
     });
   };
 
+  // --- NOUVELLE FONCTION DE SAUVEGARDE SANS RESET ---
   const saveToHistory = async () => {
     if (owners.length === 0 || !formData.ownerId) {
       showToast('⚠️ Vous devez sélectionner un propriétaire !');
       return;
     }
 
-    const dataToSave = { ...formData, id: editingId || Date.now().toString(), updatedAt: new Date().toISOString() };
+    const dataToSave = { ...formData, updatedAt: new Date().toISOString() };
     if (!editingId) dataToSave.createdAt = new Date().toISOString();
 
     if (!user) {
+      // Sauvegarde Hors-Ligne
+      dataToSave.id = editingId || Date.now().toString();
       saveToLocalHistory(dataToSave);
-      showToast('📌 Sauvegardé localement (Hors-ligne)');
-      resetForm();
-      setActiveTab('history');
+      setEditingId(dataToSave.id); // On passe en mode "édition" pour ne pas créer de doublons si on reclique
+      showToast('📌 Rapport sauvegardé localement (Hors-ligne)');
       return;
     }
     
     try {
       if (editingId) {
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reports', editingId), dataToSave, { merge: true });
-        showToast('📌 Rapport mis à jour (Cloud)');
+        // Mise à jour Cloud
+        await setDoc(doc(db, 'users', user.uid, 'reports', editingId), dataToSave, { merge: true });
+        showToast('📌 Rapport mis à jour avec succès (Cloud) !');
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'reports'), dataToSave);
-        showToast('📌 Nouveau rapport enregistré (Cloud)');
+        // Création Cloud
+        const docRef = await addDoc(collection(db, 'users', user.uid, 'reports'), dataToSave);
+        setEditingId(docRef.id); // L'ID firebase est affecté au formulaire courant
+        showToast('📌 Nouveau rapport enregistré (Cloud) !');
       }
-      resetForm();
-      setActiveTab('history');
+      // NOTE IMPORTANTE: On NE FAIT PLUS "resetForm()" ici. 
+      // Le rapport reste à l'écran pour que l'utilisateur aille dans "Aperçu".
     } catch (error) {
       console.error("Firebase a bloqué, sauvegarde locale...", error);
+      dataToSave.id = editingId || Date.now().toString();
       saveToLocalHistory(dataToSave);
-      showToast('📌 Sauvegardé localement (Permission Firebase refusée)');
-      resetForm();
-      setActiveTab('history');
+      setEditingId(dataToSave.id);
+      showToast('📌 Sauvegardé localement (Permission Cloud refusée)');
     }
   };
 
@@ -297,7 +312,7 @@ export default function App() {
   };
 
   const duplicateReport = (item) => {
-    setEditingId(null);
+    setEditingId(null); // Force a new ID
     setFormData({
       reportDate: new Date().toISOString().split('T')[0],
       reportType: item.reportType,
@@ -309,51 +324,50 @@ export default function App() {
       customProblem: item.customProblem || ''
     });
     setActiveTab('form');
-    showToast('📋 Rapport dupliqué');
+    showToast('📋 Rapport copié. Modifiez-le puis Sauvegardez.');
   };
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
     
+    // Tenter suppression Cloud
     if (user) {
       try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reports', itemToDelete));
+        await deleteDoc(doc(db, 'users', user.uid, 'reports', itemToDelete));
       } catch (e) {
         console.error("Erreur Firebase delete", e);
       }
     }
     
+    // Forcer suppression locale
     setHistory(prev => {
       const newHistory = prev.filter(item => item.id !== itemToDelete);
       localStorage.setItem('fleet_local_history', JSON.stringify(newHistory));
       return newHistory;
     });
 
-    showToast('🗑️ Rapport supprimé');
+    showToast('🗑️ Rapport supprimé définitivement');
     if (editingId === itemToDelete) resetForm();
     setItemToDelete(null);
   };
 
+  // --- GESTION PROPRIÉTAIRES ---
   const handleSaveOwner = (e) => {
     e.preventDefault();
     if (!newOwner.name.trim()) return;
     
-    let updatedOwnerId = formData.ownerId;
-
     if (editingOwnerId) {
       const updated = owners.map(o => o.id === editingOwnerId ? { ...o, ...newOwner } : o);
       saveOwnersToLocal(updated);
       setEditingOwnerId(null);
-      showToast('🏢 Propriétaire modifié avec succès');
+      showToast('🏢 Propriétaire modifié');
     } else {
       const newO = { id: `prop-${Date.now()}`, ...newOwner };
       const updated = [...owners, newO];
       saveOwnersToLocal(updated);
-      updatedOwnerId = newO.id;
       updateForm('ownerId', newO.id);
       showToast('🏢 Nouveau propriétaire ajouté');
     }
-    
     setNewOwner({ name: '', phone: '', company: '' });
   };
 
@@ -369,6 +383,7 @@ export default function App() {
     setEditingOwnerId(o.id);
   };
 
+  // --- GESTION VÉHICULES ---
   const handleSaveVehicleOption = (e) => {
     e.preventDefault();
     if (!newVehicleName.trim()) return;
@@ -378,7 +393,7 @@ export default function App() {
       updated[editingVehicleIndex] = newVehicleName.trim();
       saveVehiclesToLocal(updated);
       setEditingVehicleIndex(null);
-      showToast('🚗 Véhicule modifié avec succès');
+      showToast('🚗 Véhicule modifié');
     } else {
       const updated = [...availableVehicles, newVehicleName.trim()];
       saveVehiclesToLocal(updated);
@@ -398,6 +413,7 @@ export default function App() {
     setEditingVehicleIndex(index);
   };
 
+  // --- PHOTO ---
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -438,6 +454,7 @@ export default function App() {
     updateArrears('proofName', '');
   };
 
+  // --- UPDATES FORMULAIRE ---
   const updateForm = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
   
   const updateVehicle = (id, field, value) => {
@@ -446,7 +463,7 @@ export default function App() {
   };
   const addVehicle = () => {
     if (availableVehicles.length === 0) {
-      showToast('⚠️ Vous devez d\'abord ajouter un véhicule à votre flotte.');
+      showToast('⚠️ Vous devez d\'abord ajouter un véhicule dans "Gérer Véhicules".');
       setIsVehicleModalOpen(true);
       return;
     }
@@ -463,7 +480,7 @@ export default function App() {
   };
   const addExpense = () => {
     if (availableVehicles.length === 0) {
-      showToast('⚠️ Vous devez d\'abord ajouter un véhicule à votre flotte.');
+      showToast('⚠️ Vous devez d\'abord ajouter un véhicule.');
       setIsVehicleModalOpen(true);
       return;
     }
@@ -476,7 +493,7 @@ export default function App() {
 
   const addAlert = () => {
     if (availableVehicles.length === 0) {
-      showToast('⚠️ Vous devez d\'abord ajouter un véhicule à votre flotte.');
+      showToast('⚠️ Vous devez d\'abord ajouter un véhicule.');
       setIsVehicleModalOpen(true);
       return;
     }
@@ -493,6 +510,7 @@ export default function App() {
 
   const updateArrears = (field, value) => updateForm('arrears', { ...formData.arrears, [field]: value });
 
+  // --- CALCULS FINANCIERS ---
   const totalRecette = useMemo(() => formData.vehicles.reduce((sum, v) => sum + (parseFloat(v.amount) || 0), 0), [formData.vehicles]);
   const totalExpenses = useMemo(() => formData.expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0), [formData.expenses]);
   const soldeDuJour = totalRecette - totalExpenses;
@@ -506,7 +524,7 @@ export default function App() {
   }, [formData.arrears.previous, formData.arrears.paid, soldeDuJour]);
 
   const activeOwnerObj = useMemo(() => {
-    return owners.find(o => o.id === formData.ownerId) || owners[0] || null;
+    return owners.find(o => o.id === formData.ownerId) || null;
   }, [formData.ownerId, owners]);
 
   const generateWhatsAppText = () => {
@@ -739,6 +757,7 @@ export default function App() {
         </div>
       )}
 
+      {/* --- MODALE GESTION PROPRIÉTAIRES --- */}
       {isOwnerModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#eff6ff] rounded-2xl shadow-xl max-w-md w-full p-6 border-4 border-blue-400 relative flex flex-col max-h-[90vh]">
@@ -796,6 +815,7 @@ export default function App() {
         </div>
       )}
 
+      {/* --- MODALE GESTION VÉHICULES --- */}
       {isVehicleModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#fdf2f8] rounded-2xl shadow-xl max-w-sm w-full p-6 border-4 border-pink-400 relative flex flex-col max-h-[90vh]">
@@ -840,6 +860,7 @@ export default function App() {
         </div>
       )}
 
+      {/* --- HEADER --- */}
       <header className="bg-gradient-to-r from-amber-700 to-amber-900 text-white shadow-lg sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
@@ -1138,13 +1159,14 @@ export default function App() {
                 </div>
               </div>
 
+              {/* BARRE D'ACTIONS DU FORMULAIRE */}
               <div className="flex gap-3 pt-4 sticky bottom-4 z-10 lg:static lg:bg-transparent bg-[#faf8f5]/90 backdrop-blur-sm p-4 lg:p-0 rounded-2xl shadow-[0_-10px_15px_-3px_rgba(250,248,245,0.9)] lg:shadow-none">
                 <button onClick={resetForm} className="px-4 py-3 bg-white border-2 border-slate-300 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 shadow-sm">
                   <RotateCcw size={18} />
                   <span className="hidden sm:inline">Nouveau</span>
                 </button>
                 <button onClick={saveToHistory} className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2">
-                  <Save size={18} /> {editingId ? 'Mettre à jour' : 'Sauvegarder et Terminer'}
+                  <Save size={18} /> {editingId ? 'Mettre à jour' : 'Sauvegarder'}
                 </button>
               </div>
 
@@ -1223,7 +1245,7 @@ export default function App() {
 
         {/* --- COLONNE DROITE : APERÇU --- */}
         <div className={`w-full lg:w-[45%] xl:w-[40%] flex-col gap-4 ${activeTab === 'preview' ? 'flex' : 'hidden lg:flex'}`}>
-          <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden flex flex-col lg:h-[calc(100vh-120px)] lg:sticky lg:top-24 pb-20 lg:pb-0">
+          <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden flex flex-col h-full lg:h-[calc(100vh-120px)] lg:sticky lg:top-24">
             
             <div className="bg-slate-100 p-2 flex border-b border-slate-200 gap-1 shrink-0">
               <button 
@@ -1258,7 +1280,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 bg-slate-50 flex flex-col items-center">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 bg-slate-50 flex flex-col items-center pb-32 lg:pb-6">
               
               {previewMode === 'whatsapp' && (
                 <div 
@@ -1429,6 +1451,7 @@ export default function App() {
 
       </main>
 
+      {/* --- MENU NAVIGATION MOBILE --- */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around p-3 pb-safe z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
         <button onClick={() => setActiveTab('form')} className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'form' ? 'text-amber-600' : 'text-slate-400'}`}>
           <Edit size={20} /> <span className="text-[10px] font-bold">Édition</span>
