@@ -56,6 +56,7 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState('fiche'); // 'fiche' ou 'whatsapp'
   const [companyLogo, setCompanyLogo] = useState(null);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
   // Sauvegarde automatique dans le navigateur
   useEffect(() => {
@@ -68,6 +69,10 @@ export default function App() {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      // Afficher automatiquement notre pop-up d'installation si l'utilisateur ne l'a pas refusée récemment
+      if (!localStorage.getItem('pwa_prompt_dismissed')) {
+        setShowInstallPrompt(true);
+      }
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -100,8 +105,14 @@ export default function App() {
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') {
         setDeferredPrompt(null);
+        setShowInstallPrompt(false);
       }
     }
+  };
+
+  const dismissInstall = () => {
+    setShowInstallPrompt(false);
+    localStorage.setItem('pwa_prompt_dismissed', 'true');
   };
 
   const updateField = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
@@ -841,6 +852,25 @@ export default function App() {
         </div>
 
       </main>
+
+      {/* POPUP D'INSTALLATION PWA AUTOMATIQUE */}
+      {showInstallPrompt && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-[400px] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl z-50 flex flex-col gap-3 border border-slate-700 animate-in slide-in-from-bottom-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="bg-blue-600 p-2.5 rounded-xl shrink-0"><Download size={20}/></div>
+            <div className="flex-1">
+              <h4 className="font-bold text-sm">Installer l'application</h4>
+              <p className="text-xs text-slate-300 mt-0.5">Ajoutez Flotte Pro à votre écran d'accueil pour un accès direct et hors-ligne comme une vraie application.</p>
+            </div>
+            <button onClick={dismissInstall} className="text-slate-400 hover:text-white shrink-0 p-1"><X size={18}/></button>
+          </div>
+          <div className="flex gap-2 mt-1">
+            <button onClick={dismissInstall} className="flex-1 py-2 text-xs font-bold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors">Plus tard</button>
+            <button onClick={handleInstallClick} className="flex-1 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors shadow-sm">Installer maintenant</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
