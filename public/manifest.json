@@ -1,15 +1,20 @@
 {
-  "short_name": "RapportPro",
-  "name": "Rapport Flotte Professionnel",
-  "icons": [
-    {
-      "src": "[https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Car_icon.png/512px-Car_icon.png](https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Car_icon.png/512px-Car_icon.png)",
-      "type": "image/png",
-      "sizes": "512x512"
-    }
-  ],
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#b45309",
-  "background_color": "#faf8f5"
+"short_name": "FlottePro",
+"name": "Rapport Flotte Professionnel",
+"icons": [
+{
+"src": "https://placehold.co/192x192/4f46e5/ffffff/png?text=FP",
+"type": "image/png",
+"sizes": "192x192"
+},
+{
+"src": "https://placehold.co/512x512/4f46e5/ffffff/png?text=FP",
+"type": "image/png",
+"sizes": "512x512"
+}
+],
+"start_url": "/",
+"display": "standalone",
+"theme_color": "#0f172a",
+"background_color": "#f8fafc"
 }
