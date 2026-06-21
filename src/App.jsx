@@ -73,10 +73,8 @@ export default function App() {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      // Afficher automatiquement notre pop-up d'installation si l'utilisateur ne l'a pas refusée récemment
-      if (!localStorage.getItem('pwa_prompt_dismissed')) {
-        setShowInstallPrompt(true);
-      }
+      // NOUVEAU : On affiche toujours la pop-up pour pouvoir tester l'installation
+      setShowInstallPrompt(true);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
