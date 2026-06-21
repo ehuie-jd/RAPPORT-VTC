@@ -61,6 +61,14 @@ export default function App() {
     if (saved) setFormData(JSON.parse(saved));
     if (savedLogo) setCompanyLogo(savedLogo);
     
+    // NOUVEAU : Enregistrer le Service Worker (OBLIGATOIRE POUR L'INSTALLATION PWA)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(
+        (registration) => { console.log('ServiceWorker enregistré avec succès:', registration.scope); },
+        (err) => { console.log('Échec ServiceWorker:', err); }
+      );
+    }
+
     // Écouteur pour l'installation PWA (Progressive Web App)
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
