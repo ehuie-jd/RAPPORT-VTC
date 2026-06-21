@@ -243,12 +243,22 @@ export default function App() {
     // NOUVEAU CALCUL : Les créances remboursées ce jour (argent qui rentre)
     const creancesRecuperees = (formData.creances || []).reduce((sum, c) => sum + (parseFloat(c.montantRembourse) || 0), 0);
     
-    // NOUVEAU SOLDE : Recettes + Créances remboursées - Dépenses
-    const solde = recettes + creancesRecuperees - depenses; 
+    // NOUVEAU CALCUL : Les dettes/arriérés qu'on a payés ce jour (argent qui sort)
+    const totalArrieresPayes = (formData.dettes || []).reduce((sum, d) => sum + (parseFloat(d.montantPaye) || 0), 0);
     
-    const resteEnCaisse = (parseFloat(formData.caisseDisponible) || 0) - (parseFloat(formData.versement) || 0);
+    // NOUVEAU SOLDE : Recettes + Créances remboursées - Dépenses - Arriérés payés
+    const solde = recettes + creancesRecuperees - depenses - totalArrieresPayes; 
     
-    return { recettes, depenses, creancesRecuperees, solde, resteDettes, resteEnCaisse };
+    const caisseInitiale = parseFloat(formData.caisseDisponible) || 0;
+    const versement = parseFloat(formData.versement) || 0;
+    
+    // PRÉLÈVEMENT SUR LA CAISSE : Si le solde est négatif (déficit), on puise dans la caisse générale
+    const prelevementCaisse = solde < 0 ? solde : 0;
+    
+    // RESTE EN CAISSE : Caisse initiale + Déficit (qui est une valeur négative) - Versement
+    const resteEnCaisse = caisseInitiale + prelevementCaisse - versement;
+    
+    return { recettes, depenses, creancesRecuperees, totalArrieresPayes, solde, resteDettes, caisseInitiale, prelevementCaisse, resteEnCaisse, versement };
   }, [formData.recettes, formData.depenses, formData.dettes, formData.creances, formData.caisseDisponible, formData.versement]);
 
   const generateText = () => {
@@ -306,12 +316,19 @@ export default function App() {
     }
 
     text += `📊 *BILAN DU JOUR*\n`;
-    text += `• Solde Net (Recettes + Créances - Dépenses) : *${formatArgent(totaux.solde)} FCFA*\n`;
+    if (totaux.totalArrieresPayes > 0) {
+      text += `• Dettes remboursées (sorties) : *-${formatArgent(totaux.totalArrieresPayes)} FCFA*\n`;
+    }
+    text += `• Solde Net (Recettes + Créances - Dépenses - Dettes remboursées) : *${formatArgent(totaux.solde)} FCFA*\n`;
     
-    if (d.caisseDisponible) text += `• 🏦 *Caisse Générale (Dispo) : ${formatArgent(d.caisseDisponible)} FCFA*\n`;
+    if (d.caisseDisponible) text += `• 🏦 *Caisse Générale (Initiale) : ${formatArgent(totaux.caisseInitiale)} FCFA*\n`;
     
-    if (d.versement) text += `• 🟢 *Versement effectué : ${formatArgent(d.versement)} FCFA*\n`;
-    if (d.caisseDisponible || d.versement) {
+    if (totaux.prelevementCaisse < 0) {
+      text += `• ⚠️ Déficit prélevé sur la caisse : *${formatArgent(totaux.prelevementCaisse)} FCFA*\n`;
+    }
+    
+    if (d.versement) text += `• 🟢 *Versement effectué : ${formatArgent(totaux.versement)} FCFA*\n`;
+    if (d.caisseDisponible || d.versement || totaux.prelevementCaisse < 0) {
       text += `• 🏁 *Reste en Caisse Générale : ${formatArgent(totaux.resteEnCaisse)} FCFA*\n`;
     }
 
@@ -612,6 +629,14 @@ export default function App() {
                 <label className="block text-[11px] font-bold text-indigo-600 uppercase mb-1">Versement effectué</label>
                 <input type="number" placeholder="Ex: 10000" value={formData.versement} onChange={e => updateField('versement', e.target.value)} className="w-full p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-indigo-800" />
               </div>
+              
+              {totaux.prelevementCaisse < 0 && (
+                 <div className="sm:col-span-2 flex justify-between items-center bg-red-50 p-3 rounded-lg border border-red-200 shadow-sm mt-1">
+                    <span className="text-xs font-bold text-red-600 uppercase">Déficit prélevé sur la caisse :</span>
+                    <span className="text-sm font-black text-red-700">{formatArgent(totaux.prelevementCaisse)} FCFA</span>
+                 </div>
+              )}
+
               <div className="sm:col-span-2 flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm mt-1">
                 <span className="text-xs font-bold text-slate-500 uppercase">Reste en Caisse Générale :</span>
                 <span className={`text-lg font-black ${totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
@@ -810,30 +835,40 @@ export default function App() {
                     <div className="flex justify-between items-center text-slate-800 bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-sm mb-4">
                        <div className="flex flex-col">
                           <span className="font-bold">Solde Net du jour</span>
-                          <span className="text-[10px] text-slate-500">Recettes + Créances récupérées - Dépenses</span>
+                          <span className="text-[9px] text-slate-500">Recettes + Créances - Dépenses {totaux.totalArrieresPayes > 0 ? '- Dettes payées' : ''}</span>
                        </div>
-                       <span className="font-black text-lg text-slate-900">{formatArgent(totaux.solde)} F</span>
+                       <div className="text-right">
+                          {totaux.totalArrieresPayes > 0 && <span className="block text-[10px] text-rose-500 font-bold mb-1">Dettes payées: -{formatArgent(totaux.totalArrieresPayes)} F</span>}
+                          <span className="font-black text-lg text-slate-900">{formatArgent(totaux.solde)} F</span>
+                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       {formData.caisseDisponible && (
                         <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm col-span-2 flex justify-between items-center">
-                          <span className="block text-xs text-slate-600 font-medium">Caisse Générale (Dispo)</span>
-                          <span className="font-bold text-slate-800 text-base">{formatArgent(formData.caisseDisponible)} F</span>
+                          <span className="block text-xs text-slate-600 font-medium">Caisse Générale (Initiale)</span>
+                          <span className="font-bold text-slate-800 text-base">{formatArgent(totaux.caisseInitiale)} F</span>
                         </div>
+                      )}
+                      
+                      {totaux.prelevementCaisse < 0 && (
+                         <div className="bg-red-50 p-3 rounded-xl border border-red-100 shadow-sm col-span-2 flex justify-between items-center">
+                            <span className="block text-xs text-red-700 font-medium">Déficit déduit de la caisse</span>
+                            <span className="font-bold text-red-700 text-base">{formatArgent(totaux.prelevementCaisse)} F</span>
+                         </div>
                       )}
                       
                       {formData.versement && (
                         <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 col-span-2 flex flex-col justify-center shadow-sm">
                           <div className="flex justify-between items-center">
                             <span className="block text-xs text-emerald-800 font-bold uppercase tracking-wider">Versement effectué</span>
-                            <span className="font-bold text-emerald-700 text-lg">{formatArgent(formData.versement)} FCFA</span>
+                            <span className="font-bold text-emerald-700 text-lg">{formatArgent(totaux.versement)} FCFA</span>
                           </div>
                         </div>
                       )}
                     </div>
 
-                    {(formData.caisseDisponible || formData.versement) && (
+                    {(formData.caisseDisponible || formData.versement || totaux.prelevementCaisse < 0) && (
                       <div className="border-t border-indigo-200 pt-4 flex justify-between items-center text-sm mt-3">
                         <span className="font-bold text-indigo-950">Reste en Caisse Générale :</span>
                         <span className={`font-black text-xl ${totaux.resteEnCaisse < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
