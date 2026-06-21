@@ -1,3 +1,5 @@
+const CACHE_NAME = 'flotte-pro-v2';
+
 self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
@@ -7,10 +9,15 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // OBLIGATOIRE : Intercepte les requêtes pour que le téléphone Android/iOS valide l'application
+  // Cette logique est obligatoire pour valider la PWA (mode hors-ligne)
   e.respondWith(
     fetch(e.request).catch(() => {
-      return new Response('Mode hors ligne (La connexion a échoué)');
+      return caches.match(e.request).then(response => {
+        if (response) {
+          return response;
+        }
+        return new Response('Flotte Pro est en mode hors-ligne.');
+      });
     })
   );
 });
