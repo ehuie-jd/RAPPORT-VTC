@@ -233,9 +233,17 @@ export default function App() {
     const recettes = formData.recettes.reduce((sum, r) => sum + (parseFloat(r.montant) || 0), 0);
     const depenses = formData.depenses.reduce((sum, d) => sum + (parseFloat(d.montant) || 0), 0);
     const resteDettes = (formData.dettes || []).reduce((sum, d) => sum + ((parseFloat(d.montantDu) || 0) - (parseFloat(d.montantPaye) || 0)), 0);
+    
+    // NOUVEAU CALCUL : Les créances remboursées ce jour (argent qui rentre)
+    const creancesRecuperees = (formData.creances || []).reduce((sum, c) => sum + (parseFloat(c.montantRembourse) || 0), 0);
+    
+    // NOUVEAU SOLDE : Recettes + Créances remboursées - Dépenses
+    const solde = recettes + creancesRecuperees - depenses; 
+    
     const resteEnCaisse = (parseFloat(formData.caisseDisponible) || 0) - (parseFloat(formData.versement) || 0);
-    return { recettes, depenses, solde: recettes - depenses, resteDettes, resteEnCaisse };
-  }, [formData.recettes, formData.depenses, formData.dettes, formData.caisseDisponible, formData.versement]);
+    
+    return { recettes, depenses, creancesRecuperees, solde, resteDettes, resteEnCaisse };
+  }, [formData.recettes, formData.depenses, formData.dettes, formData.creances, formData.caisseDisponible, formData.versement]);
 
   const generateText = () => {
     const d = formData;
@@ -286,19 +294,19 @@ export default function App() {
         const du = parseFloat(creance.montantDu) || 0;
         const paye = parseFloat(creance.montantRembourse) || 0;
         const reste = du - paye;
-        text += `• ${type} :\n  Prêté/Dû : ${formatArgent(du)} F | Récupéré : *${formatArgent(paye)} F*\n  _Reste à percevoir : ${formatArgent(reste)} F_\n`;
+        text += `• ${type} :\n  Prêté/Dû : ${formatArgent(du)} F | Récupéré : *+${formatArgent(paye)} F*\n  _Reste à percevoir : ${formatArgent(reste)} F_\n`;
       });
       text += `\n`;
     }
 
-    text += `📊 *BILAN & CAISSE*\n`;
-    text += `• Solde généré net : ${formatArgent(totaux.solde)} FCFA\n`;
-    // Affichage de la caisse disponible
-    if (d.caisseDisponible) text += `• 🏦 *Disponible en caisse : ${formatArgent(d.caisseDisponible)} FCFA*\n`;
+    text += `📊 *BILAN DU JOUR*\n`;
+    text += `• Solde Net (Recettes + Créances - Dépenses) : *${formatArgent(totaux.solde)} FCFA*\n`;
+    
+    if (d.caisseDisponible) text += `• 🏦 *Caisse Générale (Dispo) : ${formatArgent(d.caisseDisponible)} FCFA*\n`;
     
     if (d.versement) text += `• 🟢 *Versement effectué : ${formatArgent(d.versement)} FCFA*\n`;
     if (d.caisseDisponible || d.versement) {
-      text += `• 🏁 *Reste en caisse : ${formatArgent(totaux.resteEnCaisse)} FCFA*\n`;
+      text += `• 🏁 *Reste en Caisse Générale : ${formatArgent(totaux.resteEnCaisse)} FCFA*\n`;
     }
 
     if (d.alertes && d.alertes.length > 0) {
@@ -591,7 +599,7 @@ export default function App() {
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
               <div>
-                <label className="block text-[11px] font-bold text-teal-600 uppercase mb-1 flex items-center gap-1"><Banknote size={14}/> Disponible en caisse</label>
+                <label className="block text-[11px] font-bold text-teal-600 uppercase mb-1 flex items-center gap-1"><Banknote size={14}/> Caisse Générale (Dispo)</label>
                 <input type="number" placeholder="Ex: 50000" value={formData.caisseDisponible} onChange={e => updateField('caisseDisponible', e.target.value)} className="w-full p-2.5 bg-teal-50 border border-teal-200 rounded-xl outline-none focus:border-teal-500 font-bold text-sm text-teal-800" />
               </div>
               <div>
@@ -599,7 +607,7 @@ export default function App() {
                 <input type="number" placeholder="Ex: 10000" value={formData.versement} onChange={e => updateField('versement', e.target.value)} className="w-full p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-indigo-800" />
               </div>
               <div className="sm:col-span-2 flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm mt-1">
-                <span className="text-xs font-bold text-slate-500 uppercase">Reste en caisse calculé :</span>
+                <span className="text-xs font-bold text-slate-500 uppercase">Reste en Caisse Générale :</span>
                 <span className={`text-lg font-black ${totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
               </div>
             </div>
@@ -764,22 +772,22 @@ export default function App() {
                   )}
 
                   {formData.creances && formData.creances.length > 0 && (
-                    <div className="mt-3">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b pb-1 flex items-center gap-1"><TrendingUp size={12}/> Créances (Crédits)</h4>
-                      <div className="space-y-2">
+                    <div className="space-y-4 mb-6">
+                      <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={14} className="text-cyan-500"/> Créances (Crédits)</h5>
+                      <div className="space-y-2.5">
                         {formData.creances.map(creance => {
                            const du = parseFloat(creance.montantDu) || 0;
                            const paye = parseFloat(creance.montantRembourse) || 0;
                            return (
-                            <div key={creance.id} className="bg-cyan-50/50 p-2 rounded-lg border border-cyan-100 text-xs">
-                              <div className="font-medium text-slate-700 mb-1">{creance.type === 'Autre...' ? creance.detail : creance.type}</div>
-                              <div className="flex justify-between text-slate-600">
+                            <div key={creance.id} className="bg-cyan-50/50 p-3 rounded-xl border border-cyan-100 text-sm shadow-sm">
+                              <div className="font-bold text-slate-700 mb-1.5">{creance.type === 'Autre...' ? creance.detail : creance.type}</div>
+                              <div className="flex justify-between text-slate-600 text-xs">
                                 <span>Prêté/Dû : {formatArgent(du)} F</span>
-                                <span className="font-bold text-emerald-600">Récupéré : {formatArgent(paye)} F</span>
+                                <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Récupéré : +{formatArgent(paye)} F</span>
                               </div>
-                              <div className="flex justify-between border-t border-cyan-200/60 mt-1 pt-1 font-bold">
-                                <span className="text-slate-500">Reste à percevoir</span>
-                                <span className="text-cyan-600">{formatArgent(du - paye)} F</span>
+                              <div className="flex justify-between border-t border-cyan-200 mt-2 pt-2 text-xs">
+                                <span className="font-medium text-slate-500">Reste à percevoir :</span>
+                                <span className="font-bold text-cyan-700">{formatArgent(du - paye)} F</span>
                               </div>
                             </div>
                            )
@@ -788,35 +796,45 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-3">
-                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Clipboard size={12}/> Bilan & Caisse</h4>
-                    <div className="space-y-1.5 text-xs">
-                      <div className="flex justify-between text-slate-600">
-                        <span>Solde Net :</span>
-                        <span className="font-bold">{formatArgent(totaux.solde)} F</span>
-                      </div>
+                  <div className="space-y-4 mb-8 bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl shadow-sm">
+                    <h5 className="text-xs font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
+                      <Clipboard size={14} className="text-indigo-600"/> 3. Bilan & Versement
+                    </h5>
+                    
+                    <div className="flex justify-between items-center text-slate-800 bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-sm mb-4">
+                       <div className="flex flex-col">
+                          <span className="font-bold">Solde Net du jour</span>
+                          <span className="text-[10px] text-slate-500">Recettes + Créances récupérées - Dépenses</span>
+                       </div>
+                       <span className="font-black text-lg text-slate-900">{formatArgent(totaux.solde)} F</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-sm">
                       {formData.caisseDisponible && (
-                        <div className="flex justify-between text-slate-600">
-                          <span>Dispo en caisse :</span>
-                          <span className="font-bold">{formatArgent(formData.caisseDisponible)} F</span>
+                        <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm col-span-2 flex justify-between items-center">
+                          <span className="block text-xs text-slate-600 font-medium">Caisse Générale (Dispo)</span>
+                          <span className="font-bold text-slate-800 text-base">{formatArgent(formData.caisseDisponible)} F</span>
                         </div>
                       )}
+                      
                       {formData.versement && (
-                        <div className="flex justify-between text-emerald-700 font-medium">
-                          <span>Versement effectué :</span>
-                          <span className="font-bold">{formatArgent(formData.versement)} F</span>
-                        </div>
-                      )}
-                      {(formData.caisseDisponible || formData.versement) && (
-                        <div className="flex justify-between border-t border-slate-200 mt-1.5 pt-1.5 font-bold">
-                          <span className="text-slate-500">Reste en caisse calculé :</span>
-                          <span className={totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}>{formatArgent(totaux.resteEnCaisse)} F</span>
+                        <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 col-span-2 flex flex-col justify-center shadow-sm">
+                          <div className="flex justify-between items-center">
+                            <span className="block text-xs text-emerald-800 font-bold uppercase tracking-wider">Versement effectué</span>
+                            <span className="font-bold text-emerald-700 text-lg">{formatArgent(formData.versement)} FCFA</span>
+                          </div>
                         </div>
                       )}
                     </div>
+
+                    {(formData.caisseDisponible || formData.versement) && (
+                      <div className="border-t border-indigo-200 pt-4 flex justify-between items-center text-sm mt-3">
+                        <span className="font-bold text-indigo-950">Reste en Caisse Générale :</span>
+                        <span className={`font-black text-xl ${totaux.resteEnCaisse < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
+                      </div>
+                    )}
                   </div>
 
-                  {}
                   {(formData.alertes?.length > 0 || formData.besoins) && (
                     <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-3">
                       <h4 className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-2 flex items-center gap-1"><Bell size={12}/> Alertes & Nécessités</h4>
