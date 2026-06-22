@@ -61,7 +61,7 @@ export default function App() {
     if (saved) setFormData(JSON.parse(saved));
     if (savedLogo) setCompanyLogo(savedLogo);
     
-    // NOUVEAU : Enregistrer le Service Worker (OBLIGATOIRE POUR L'INSTALLATION PWA)
+    // Enregistrer le Service Worker (OBLIGATOIRE POUR L'INSTALLATION PWA)
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').then(
         (registration) => { console.log('ServiceWorker enregistré avec succès:', registration.scope); },
@@ -73,7 +73,6 @@ export default function App() {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      // NOUVEAU : On affiche toujours la pop-up pour pouvoir tester l'installation
       setShowInstallPrompt(true);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -240,31 +239,28 @@ export default function App() {
     const depenses = formData.depenses.reduce((sum, d) => sum + (parseFloat(d.montant) || 0), 0);
     const resteDettes = (formData.dettes || []).reduce((sum, d) => sum + ((parseFloat(d.montantDu) || 0) - (parseFloat(d.montantPaye) || 0)), 0);
     
-    // NOUVEAU CALCUL : Les créances remboursées ce jour (argent qui rentre)
+    // L'argent qui rentre des créances
     const creancesRecuperees = (formData.creances || []).reduce((sum, c) => sum + (parseFloat(c.montantRembourse) || 0), 0);
     
-    // NOUVEAU CALCUL : Les dettes/arriérés qu'on a payés ce jour (argent qui sort)
+    // L'argent qui sort pour payer les anciennes dettes
     const totalArrieresPayes = (formData.dettes || []).reduce((sum, d) => sum + (parseFloat(d.montantPaye) || 0), 0);
     
-    // NOUVEAU SOLDE : Recettes + Créances remboursées - Dépenses - Arriérés payés
+    // SOLDE NET : Ce qui a été gagné aujourd'hui
     const solde = recettes + creancesRecuperees - depenses - totalArrieresPayes; 
     
     const caisseInitiale = parseFloat(formData.caisseDisponible) || 0;
     const versement = parseFloat(formData.versement) || 0;
     
-    // PRÉLÈVEMENT SUR LA CAISSE : Si le solde est négatif (déficit), on puise dans la caisse générale
-    const prelevementCaisse = solde < 0 ? solde : 0;
+    // CALCUL DU RESTE EN CAISSE : On ajoute le solde (qu'il soit positif ou négatif) à la caisse initiale, puis on retire le versement
+    const resteEnCaisse = caisseInitiale + solde - versement;
     
-    // RESTE EN CAISSE : Caisse initiale + Déficit (qui est une valeur négative) - Versement
-    const resteEnCaisse = caisseInitiale + prelevementCaisse - versement;
-    
-    return { recettes, depenses, creancesRecuperees, totalArrieresPayes, solde, resteDettes, caisseInitiale, prelevementCaisse, resteEnCaisse, versement };
+    return { recettes, depenses, creancesRecuperees, totalArrieresPayes, solde, resteDettes, caisseInitiale, resteEnCaisse, versement };
   }, [formData.recettes, formData.depenses, formData.dettes, formData.creances, formData.caisseDisponible, formData.versement]);
 
   const generateText = () => {
     const d = formData;
     const dateFr = new Date(d.date).toLocaleDateString('fr-FR');
-    // Le titre s'adapte au type de rapport
+    
     let text = `📋 *RAPPORT ${d.typeRapport ? d.typeRapport.toUpperCase() : 'JOURNALIER'}*\n`;
     text += `🏢 Flotte : ${d.flotteName}\n`;
     if (d.chauffeur) text += `👤 Chauffeur / Gérant : ${d.chauffeur}\n`;
@@ -317,18 +313,15 @@ export default function App() {
 
     text += `📊 *BILAN DU JOUR*\n`;
     if (totaux.totalArrieresPayes > 0) {
-      text += `• Dettes remboursées (sorties) : *-${formatArgent(totaux.totalArrieresPayes)} FCFA*\n`;
+      text += `• Dettes payées : *-${formatArgent(totaux.totalArrieresPayes)} FCFA*\n`;
     }
-    text += `• Solde Net (Recettes + Créances - Dépenses - Dettes remboursées) : *${formatArgent(totaux.solde)} FCFA*\n`;
+    text += `• Solde Net du jour : *${formatArgent(totaux.solde)} FCFA*\n`;
+    text += `_(Recettes + Créances - Dépenses - Dettes payées)_\n\n`;
     
-    if (d.caisseDisponible) text += `• 🏦 *Caisse Générale (Initiale) : ${formatArgent(totaux.caisseInitiale)} FCFA*\n`;
+    if (d.caisseDisponible) text += `• 🏦 Caisse Générale (Initiale) : ${formatArgent(totaux.caisseInitiale)} FCFA\n`;
+    if (d.versement) text += `• 🟢 Versement Propriétaire : -${formatArgent(totaux.versement)} FCFA\n`;
     
-    if (totaux.prelevementCaisse < 0) {
-      text += `• ⚠️ Déficit prélevé sur la caisse : *${formatArgent(totaux.prelevementCaisse)} FCFA*\n`;
-    }
-    
-    if (d.versement) text += `• 🟢 *Versement effectué : ${formatArgent(totaux.versement)} FCFA*\n`;
-    if (d.caisseDisponible || d.versement || totaux.prelevementCaisse < 0) {
+    if (d.caisseDisponible || d.versement || totaux.solde !== 0) {
       text += `• 🏁 *Reste en Caisse Générale : ${formatArgent(totaux.resteEnCaisse)} FCFA*\n`;
     }
 
@@ -341,7 +334,6 @@ export default function App() {
     }
 
     if (d.besoins) text += `\n🆘 *BESOINS / DEMANDES*\n_${d.besoins}_\n`;
-
     if (d.remarques) text += `\n📝 *REMARQUES*\n_${d.remarques}_\n\n`;
     
     text += `🚀 _Généré par Flotte Pro_`;
@@ -408,7 +400,6 @@ export default function App() {
         {/* --- COLONNE GAUCHE : L'ÉDITEUR --- */}
         <div className="w-full lg:w-3/5 space-y-6">
           
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><FileText size={16}/> Infos Générales</h2>
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -448,7 +439,6 @@ export default function App() {
             </div>
           </div>
 
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-emerald-500">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-emerald-600 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> Recettes Véhicules</h2>
@@ -489,7 +479,6 @@ export default function App() {
             </div>
           </div>
 
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-rose-500">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-rose-600 uppercase tracking-widest flex items-center gap-2"><DollarSign size={16}/> Dépenses</h2>
@@ -528,7 +517,6 @@ export default function App() {
             </div>
           </div>
 
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-amber-500">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-amber-600 uppercase tracking-widest flex items-center gap-2"><History size={16}/> Arriérés & Dettes</h2>
@@ -572,7 +560,6 @@ export default function App() {
             </div>
           </div>
 
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-cyan-500">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-cyan-600 uppercase tracking-widest flex items-center gap-2"><TrendingUp size={16}/> Créances (Argent qu'on vous doit)</h2>
@@ -616,27 +603,19 @@ export default function App() {
             </div>
           </div>
 
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
             <h2 className="text-sm font-bold text-indigo-600 uppercase tracking-widest mb-4 flex items-center gap-2"><Clipboard size={16}/> Bilan & Caisse</h2>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
               <div>
-                <label className="block text-[11px] font-bold text-teal-600 uppercase mb-1 flex items-center gap-1"><Banknote size={14}/> Caisse Générale (Dispo)</label>
-                <input type="number" placeholder="Ex: 50000" value={formData.caisseDisponible} onChange={e => updateField('caisseDisponible', e.target.value)} className="w-full p-2.5 bg-teal-50 border border-teal-200 rounded-xl outline-none focus:border-teal-500 font-bold text-sm text-teal-800" />
+                <label className="block text-[11px] font-bold text-teal-600 uppercase mb-1 flex items-center gap-1"><Banknote size={14}/> Caisse Générale (Initiale)</label>
+                <input type="number" placeholder="Ex: 138500" value={formData.caisseDisponible} onChange={e => updateField('caisseDisponible', e.target.value)} className="w-full p-2.5 bg-teal-50 border border-teal-200 rounded-xl outline-none focus:border-teal-500 font-bold text-sm text-teal-800" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-indigo-600 uppercase mb-1">Versement effectué</label>
                 <input type="number" placeholder="Ex: 10000" value={formData.versement} onChange={e => updateField('versement', e.target.value)} className="w-full p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-indigo-800" />
               </div>
               
-              {totaux.prelevementCaisse < 0 && (
-                 <div className="sm:col-span-2 flex justify-between items-center bg-red-50 p-3 rounded-lg border border-red-200 shadow-sm mt-1">
-                    <span className="text-xs font-bold text-red-600 uppercase">Déficit prélevé sur la caisse :</span>
-                    <span className="text-sm font-black text-red-700">{formatArgent(totaux.prelevementCaisse)} FCFA</span>
-                 </div>
-              )}
-
               <div className="sm:col-span-2 flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm mt-1">
                 <span className="text-xs font-bold text-slate-500 uppercase">Reste en Caisse Générale :</span>
                 <span className={`text-lg font-black ${totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
@@ -649,7 +628,6 @@ export default function App() {
             </div>
           </div>
 
-          {}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-orange-500">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-orange-600 uppercase tracking-widest flex items-center gap-2"><Bell size={16}/> Alertes & Besoins</h2>
@@ -690,7 +668,6 @@ export default function App() {
         {/* --- COLONNE DROITE : L'APERÇU --- */}
         <div className="w-full lg:w-2/5 flex flex-col gap-4 lg:sticky lg:top-20">
           
-          {}
           {/* Boutons d'Action Rapides */}
           <div className="bg-white p-2 flex border border-slate-200 rounded-2xl shadow-sm gap-2">
             <button onClick={() => setPreviewMode('fiche')} className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${previewMode === 'fiche' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
@@ -712,11 +689,10 @@ export default function App() {
             </button>
           </div>
 
-          {}
           <div className="bg-slate-200/50 p-4 rounded-3xl border border-slate-200 flex justify-center overflow-hidden">
             
             {previewMode === 'fiche' && (
-              <div id="fiche-preview" className="w-full max-w-sm bg-white rounded-2xl shadow-lg border border-slate-200 flex flex-col overflow-hidden text-slate-800">
+              <div id="fiche-preview" className="w-full max-w-sm bg-[#f8fafc] rounded-2xl shadow-lg border border-slate-200 flex flex-col overflow-hidden text-slate-800 pb-4">
                 <div className="bg-slate-900 p-5 text-white">
                   <div className="flex justify-between items-start gap-2">
                     <div className="flex-1">
@@ -735,11 +711,11 @@ export default function App() {
                   {formData.chauffeur && <p className="text-xs font-medium text-slate-300 mt-3 pt-2 border-t border-slate-800">Chauffeur / Gérant: <span className="font-bold text-white">{formData.chauffeur}</span></p>}
                 </div>
 
-                <div className="p-5 space-y-5">
+                <div className="p-5 space-y-6">
                   <div>
                     <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b pb-1">1. Recettes</h4>
                     {formData.recettes.map(r => (
-                      <div key={r.id} className="flex justify-between items-start text-sm py-1.5 border-b border-slate-50 last:border-0">
+                      <div key={r.id} className="flex justify-between items-start text-sm py-1.5 border-b border-slate-200/60 last:border-0">
                         <div className="flex flex-col">
                           <span className="font-medium text-slate-800">{r.vehicule || 'Véhicule non précisé'}</span>
                           {(r.motif !== 'Recette normale' || r.justification) && (
@@ -752,7 +728,7 @@ export default function App() {
                         <span className="font-bold whitespace-nowrap ml-2">{formatArgent(r.montant)} F</span>
                       </div>
                     ))}
-                    <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t font-bold text-emerald-600">
+                    <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t border-slate-300 font-bold text-emerald-600">
                       <span>Total Recettes</span>
                       <span>{formatArgent(totaux.recettes)} FCFA</span>
                     </div>
@@ -762,7 +738,7 @@ export default function App() {
                     <div>
                       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b pb-1">2. Dépenses</h4>
                       {formData.depenses.map(d => (
-                        <div key={d.id} className="flex justify-between items-start text-sm py-1.5 text-slate-600 border-b border-slate-50 last:border-0">
+                        <div key={d.id} className="flex justify-between items-start text-sm py-1.5 text-slate-600 border-b border-slate-200/60 last:border-0">
                           <div className="flex flex-col">
                             <span className="font-medium">{d.type === 'Autre...' ? (d.customType || 'Autre') : d.type}</span>
                             {d.detail && <span className="text-[10px] text-slate-400 mt-0.5">{d.detail}</span>}
@@ -770,7 +746,7 @@ export default function App() {
                           <span className="font-bold text-rose-500 whitespace-nowrap ml-2">-{formatArgent(d.montant)} F</span>
                         </div>
                       ))}
-                      <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t font-bold text-rose-600">
+                      <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t border-slate-300 font-bold text-rose-600">
                         <span>Total Dépenses</span>
                         <span>{formatArgent(totaux.depenses)} FCFA</span>
                       </div>
@@ -804,13 +780,13 @@ export default function App() {
 
                   {formData.creances && formData.creances.length > 0 && (
                     <div className="space-y-4 mb-6">
-                      <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={14} className="text-cyan-500"/> Créances (Crédits)</h5>
+                      <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={12} className="text-cyan-500"/> Créances (Crédits)</h5>
                       <div className="space-y-2.5">
                         {formData.creances.map(creance => {
                            const du = parseFloat(creance.montantDu) || 0;
                            const paye = parseFloat(creance.montantRembourse) || 0;
                            return (
-                            <div key={creance.id} className="bg-cyan-50/50 p-3 rounded-xl border border-cyan-100 text-sm shadow-sm">
+                            <div key={creance.id} className="bg-cyan-50/50 p-3 rounded-xl border border-cyan-100 text-xs shadow-sm">
                               <div className="font-bold text-slate-700 mb-1.5">{creance.type === 'Autre...' ? creance.detail : creance.type}</div>
                               <div className="flex justify-between text-slate-600 text-xs">
                                 <span>Prêté/Dû : {formatArgent(du)} F</span>
@@ -827,89 +803,42 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="space-y-4 mb-8 bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl shadow-sm">
-                    <h5 className="text-xs font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
-                      <Clipboard size={14} className="text-indigo-600"/> 3. Bilan & Versement
+                  {/* NOUVELLE SECTION BILAN & CAISSE (Basée sur l'image) */}
+                  <div className="space-y-4 bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl shadow-sm">
+                    <h5 className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
+                      <Clipboard size={14} className="text-indigo-600"/> 3. Bilan & Caisse
                     </h5>
-                    
-                    <div className="flex justify-between items-center text-slate-800 bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-sm mb-4">
-                       <div className="flex flex-col">
-                          <span className="font-bold">Solde Net du jour</span>
-                          <span className="text-[9px] text-slate-500">Recettes + Créances - Dépenses {totaux.totalArrieresPayes > 0 ? '- Dettes payées' : ''}</span>
-                       </div>
-                       <div className="text-right">
-                          {totaux.totalArrieresPayes > 0 && <span className="block text-[10px] text-rose-500 font-bold mb-1">Dettes payées: -{formatArgent(totaux.totalArrieresPayes)} F</span>}
-                          <span className="font-black text-lg text-slate-900">{formatArgent(totaux.solde)} F</span>
-                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      {formData.caisseDisponible && (
-                        <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm col-span-2 flex justify-between items-center">
-                          <span className="block text-xs text-slate-600 font-medium">Caisse Générale (Initiale)</span>
-                          <span className="font-bold text-slate-800 text-base">{formatArgent(totaux.caisseInitiale)} F</span>
-                        </div>
-                      )}
+                    <div className="space-y-3 mt-4">
                       
-                      {totaux.prelevementCaisse < 0 && (
-                         <div className="bg-red-50 p-3 rounded-xl border border-red-100 shadow-sm col-span-2 flex justify-between items-center">
-                            <span className="block text-xs text-red-700 font-medium">Déficit déduit de la caisse</span>
-                            <span className="font-bold text-red-700 text-base">{formatArgent(totaux.prelevementCaisse)} F</span>
-                         </div>
-                      )}
-                      
-                      {formData.versement && (
-                        <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 col-span-2 flex flex-col justify-center shadow-sm">
-                          <div className="flex justify-between items-center">
-                            <span className="block text-xs text-emerald-800 font-bold uppercase tracking-wider">Versement effectué</span>
-                            <span className="font-bold text-emerald-700 text-lg">{formatArgent(totaux.versement)} FCFA</span>
-                          </div>
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center">
+                        <div>
+                           <span className="block font-bold text-slate-800 text-sm">Solde Net du jour</span>
+                           <span className="text-[9px] text-slate-500">Recettes + Créances - Dép. {totaux.totalArrieresPayes > 0 ? '- Dettes' : ''}</span>
                         </div>
-                      )}
-                    </div>
-
-                    {(formData.caisseDisponible || formData.versement || totaux.prelevementCaisse < 0) && (
-                      <div className="border-t border-indigo-200 pt-4 flex justify-between items-center text-sm mt-3">
-                        <span className="font-bold text-indigo-950">Reste en Caisse Générale :</span>
-                        <span className={`font-black text-xl ${totaux.resteEnCaisse < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
+                        <span className="font-black text-slate-900 text-lg">{formatArgent(totaux.solde)} F</span>
                       </div>
-                    )}
-                  </div>
 
-                  {(formData.alertes?.length > 0 || formData.besoins) && (
-                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-3">
-                      <h4 className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-2 flex items-center gap-1"><Bell size={12}/> Alertes & Nécessités</h4>
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center">
+                        <span className="block font-medium text-slate-600 text-sm">Caisse Générale (Initiale)</span>
+                        <span className="font-bold text-slate-800 text-base">{formatArgent(totaux.caisseInitiale)} F</span>
+                      </div>
+
+                      {totaux.versement > 0 && (
+                        <div className="px-2 pt-1 flex justify-between items-center text-xs text-rose-600 font-bold">
+                          <span>Versement Propriétaire :</span>
+                          <span>- {formatArgent(totaux.versement)} F</span>
+                        </div>
+                      )}
+
+                      <div className="border-t border-slate-300 pt-4 pb-1 flex flex-col items-center mt-2">
+                        <span className="font-bold text-slate-800 text-sm mb-1">Reste en Caisse Générale :</span>
+                        <span className="font-black text-indigo-700 text-2xl tracking-tight">{formatArgent(totaux.resteEnCaisse)} FCFA</span>
+                      </div>
                       
-                      {formData.alertes?.length > 0 && (
-                        <div className="space-y-1.5 mb-2">
-                          {formData.alertes.map(a => (
-                            <div key={a.id} className="text-xs bg-white p-2 rounded-lg border border-orange-100 flex gap-2">
-                              <span className="font-bold text-orange-800 shrink-0">{a.type === 'Autre...' ? 'Alerte' : a.type} :</span>
-                              <span className="text-orange-900">{a.description}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {formData.besoins && (
-                        <div className="text-xs bg-white p-2.5 rounded-lg border border-orange-200 text-orange-900 italic">
-                          <span className="font-bold block mb-0.5 not-italic">Demandes / Besoins :</span>
-                          {formData.besoins}
-                        </div>
-                      )}
                     </div>
-                  )}
-
-                  {formData.remarques && (
-                    <div className="text-xs bg-amber-50 text-amber-900 p-3 rounded-lg border border-amber-100 whitespace-pre-wrap mt-3">
-                      <span className="font-bold block mb-1">Remarques :</span>
-                      {formData.remarques}
-                    </div>
-                  )}
-
-                  <div className="text-center pt-2 mt-2">
-                     <span className="text-[8px] uppercase tracking-widest text-slate-300 font-bold">Généré par Flotte Pro</span>
                   </div>
+
                 </div>
               </div>
             )}
