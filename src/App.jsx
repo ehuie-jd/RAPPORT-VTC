@@ -839,6 +839,44 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* NOUVELLE SECTION : ALERTES, BESOINS & REMARQUES (Correction) */}
+                  {(formData.alertes?.length > 0 || formData.besoins || formData.remarques) && (
+                    <div className="space-y-3 pt-2">
+                      {(formData.alertes?.length > 0 || formData.besoins) && (
+                        <div className="bg-orange-50/60 border border-orange-100 p-4 rounded-2xl shadow-sm">
+                          <h5 className="text-[10px] font-bold text-orange-800 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                            <Bell size={12} className="text-orange-600"/> Alertes & Besoins
+                          </h5>
+                          
+                          {formData.alertes?.length > 0 && (
+                            <div className="space-y-2 mb-3">
+                              {formData.alertes.map(a => (
+                                <div key={a.id} className="bg-white p-2.5 rounded-xl border border-orange-100 flex gap-2 text-xs shadow-sm">
+                                  <span className="font-bold text-orange-700 shrink-0">🔴 {a.type === 'Autre...' ? 'Alerte' : a.type} :</span>
+                                  <span className="text-orange-900">{a.description}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {formData.besoins && (
+                            <div className="bg-white p-3 rounded-xl border border-orange-200 text-xs text-orange-900 italic shadow-sm">
+                              <span className="font-bold block mb-1 not-italic">Demandes / Besoins :</span>
+                              {formData.besoins}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {formData.remarques && (
+                        <div className="bg-slate-50 text-slate-700 p-3.5 rounded-2xl border border-slate-200 text-xs whitespace-pre-wrap shadow-sm">
+                          <span className="font-bold block mb-1">📝 Remarques :</span>
+                          {formData.remarques}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 </div>
               </div>
             )}
