@@ -3,7 +3,7 @@ import {
   Plus, Trash2, Copy, CheckCircle2, Download, RefreshCw, 
   Car, Wallet, DollarSign, Clipboard, AlertCircle, Loader2, 
   FileText, Layout, Share2, History, Banknote, Bell, AlertTriangle, TrendingUp,
-  Image as ImageIcon, X
+  Image as ImageIcon, X, Save, Search, Send, Edit
 } from 'lucide-react';
 
 const DEPENSES_DEFAUT = [
@@ -54,12 +54,21 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
+  // NOUVEAUX ÉTATS : Historique et Recherche
+  const [reportsHistory, setReportsHistory] = useState([]);
+  const [activeTab, setActiveTab] = useState('form'); // 'form' ou 'history'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentEditId, setCurrentEditId] = useState(null);
+
   // Sauvegarde automatique dans le navigateur
   useEffect(() => {
     const saved = localStorage.getItem('fleet_pro_draft');
     const savedLogo = localStorage.getItem('fleet_pro_logo');
+    const savedHistory = localStorage.getItem('fleet_pro_history');
+    
     if (saved) setFormData(JSON.parse(saved));
     if (savedLogo) setCompanyLogo(savedLogo);
+    if (savedHistory) setReportsHistory(JSON.parse(savedHistory));
     
     // Enregistrer le Service Worker (OBLIGATOIRE POUR L'INSTALLATION PWA)
     if ('serviceWorker' in navigator) {
@@ -225,8 +234,54 @@ export default function App() {
         besoins: '',
         remarques: ''
       });
+      setCurrentEditId(null);
     }
   };
+
+  // NOUVEAU : Sauvegarder dans la base d'historique
+  const saveReport = () => {
+    const reportToSave = { ...formData, id: currentEditId || Date.now(), updatedAt: new Date().toISOString() };
+    let newHistory;
+    
+    if (currentEditId) {
+      newHistory = reportsHistory.map(r => r.id === currentEditId ? reportToSave : r);
+    } else {
+      newHistory = [reportToSave, ...reportsHistory]; // Ajoute le nouveau rapport en haut de la liste
+    }
+    
+    setReportsHistory(newHistory);
+    localStorage.setItem('fleet_pro_history', JSON.stringify(newHistory));
+    setCurrentEditId(reportToSave.id);
+    alert('✅ Rapport sauvegardé avec succès dans l\'historique !');
+  };
+
+  // NOUVEAU : Charger un rapport depuis l'historique
+  const loadReport = (report) => {
+    setFormData(report);
+    setCurrentEditId(report.id);
+    setActiveTab('form');
+  };
+
+  // NOUVEAU : Supprimer un rapport
+  const deleteReport = (id) => {
+    if(window.confirm('Voulez-vous vraiment supprimer ce rapport de l\'historique ?')) {
+      const newHistory = reportsHistory.filter(r => r.id !== id);
+      setReportsHistory(newHistory);
+      localStorage.setItem('fleet_pro_history', JSON.stringify(newHistory));
+      if (currentEditId === id) resetForm();
+    }
+  };
+
+  // NOUVEAU : Filtre de recherche
+  const filteredHistory = reportsHistory.filter(report => {
+    const searchLower = searchQuery.toLowerCase();
+    return (
+      report.flotteName?.toLowerCase().includes(searchLower) ||
+      report.chauffeur?.toLowerCase().includes(searchLower) ||
+      report.date?.includes(searchLower) ||
+      report.typeRapport?.toLowerCase().includes(searchLower)
+    );
+  });
 
   const formatArgent = (val) => {
     if (!val) return "0";
@@ -373,6 +428,12 @@ export default function App() {
     }
   };
 
+  // NOUVEAU : Envoyer par WhatsApp directement
+  const sendWhatsApp = () => {
+    const text = encodeURIComponent(generateText());
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans pb-24 lg:pb-8">
       
@@ -382,14 +443,22 @@ export default function App() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <Car className="text-blue-400" /> Flotte <span className="font-light">Pro</span>
           </h1>
-          <div className="flex items-center gap-3">
-            {deferredPrompt && (
-              <button onClick={handleInstallClick} className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm transition-colors">
-                <Download size={14} /> <span className="hidden sm:inline">Installer l'Appli</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 mr-1 sm:mr-2">
+              <button onClick={() => setActiveTab('form')} className={`px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-colors flex items-center gap-1 ${activeTab === 'form' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                <Edit size={12}/> <span className="hidden sm:inline">Édition</span>
               </button>
-            )}
-            <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors border border-slate-700">
-              <RefreshCw size={16} /> <span className="hidden sm:inline">Nouvelle Fiche</span>
+              <button onClick={() => setActiveTab('history')} className={`px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-colors flex items-center gap-1 ${activeTab === 'history' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                <History size={12}/> Historique
+              </button>
+            </div>
+            
+            <button onClick={saveReport} className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] sm:text-xs px-2 sm:px-3 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm transition-colors">
+              <Save size={14} /> <span className="hidden sm:inline">Sauvegarder</span>
+            </button>
+            
+            <button onClick={resetForm} className="bg-slate-700 hover:bg-slate-600 text-[10px] sm:text-sm px-2 sm:px-3 py-2 rounded-lg flex items-center gap-1 transition-colors border border-slate-600">
+              <RefreshCw size={14} /> <span className="hidden sm:inline">Nouveau</span>
             </button>
           </div>
         </div>
@@ -397,271 +466,317 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto mt-6 p-4 flex flex-col lg:flex-row gap-8 items-start">
         
-        {/* --- COLONNE GAUCHE : L'ÉDITEUR --- */}
+        {/* --- COLONNE GAUCHE : L'ÉDITEUR OU HISTORIQUE --- */}
         <div className="w-full lg:w-3/5 space-y-6">
           
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><FileText size={16}/> Infos Générales</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-600 mb-1">Nom de la Flotte</label>
-                <input type="text" value={formData.flotteName} onChange={e => updateField('flotteName', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Type de Rapport</label>
-                <select value={formData.typeRapport} onChange={e => updateField('typeRapport', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm text-slate-700">
-                  {TYPES_RAPPORT.map(type => <option key={type} value={type}>{type}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Date</label>
-                <input type="date" value={formData.date} onChange={e => updateField('date', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
-              </div>
-              <div className="sm:col-span-4">
-                <label className="block text-xs font-bold text-slate-600 mb-1">Chauffeur / Gérant (Optionnel)</label>
-                <input type="text" placeholder="Ex: Ali" value={formData.chauffeur} onChange={e => updateField('chauffeur', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
-              </div>
-              <div className="sm:col-span-4 flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                 {companyLogo ? (
-                   <div className="relative shrink-0">
-                     <img src={companyLogo} alt="Logo" className="h-12 w-12 object-contain bg-white rounded-lg border border-slate-200 shadow-sm" />
-                     <button onClick={removeLogo} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors"><X size={12}/></button>
-                   </div>
-                 ) : (
-                   <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-colors shrink-0">
-                     <ImageIcon size={16} className="text-blue-500"/>
-                     Ajouter un Logo
-                     <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-                   </label>
-                 )}
-                 <p className="text-xs text-slate-400">Ce logo apparaîtra en haut à droite sur votre fiche au format Image/PDF.</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-emerald-500">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-bold text-emerald-600 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> Recettes Véhicules</h2>
-              <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded-lg">Total : {formatArgent(totaux.recettes)} F</span>
-            </div>
-            
-            <div className="space-y-3">
-              {formData.recettes.map((r) => (
-                <div key={r.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
-                  {formData.recettes.length > 1 && (
-                    <button onClick={() => removeRecette(r.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
-                    <div className="sm:col-span-2">
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Véhicule (Nom ou Immatriculation)</label>
-                      <input type="text" placeholder="Ex: Suzuki Noire AB-1234..." value={r.vehicule} onChange={(e) => updateRecette(r.id, 'vehicule', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-emerald-500" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
-                      <input type="number" placeholder="Ex: 15000" value={r.montant} onChange={(e) => updateRecette(r.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none focus:border-emerald-500" />
-                    </div>
-                    <div>
-                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif de la recette</label>
-                       <select value={r.motif} onChange={(e) => updateRecette(r.id, 'motif', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-emerald-500">
-                         {MOTIFS_RECETTE.map(opt => <option key={opt}>{opt}</option>)}
-                       </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails / Justification (Optionnel)</label>
-                       <input type="text" placeholder="Préciser si besoin (ex: demi-journée à cause de la pluie)..." value={r.justification} onChange={(e) => updateRecette(r.id, 'justification', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500" />
-                    </div>
+          {activeTab === 'form' ? (
+            <>
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><FileText size={16}/> Infos Générales</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-600 mb-1">Nom de la Flotte</label>
+                    <input type="text" value={formData.flotteName} onChange={e => updateField('flotteName', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">Type de Rapport</label>
+                    <select value={formData.typeRapport} onChange={e => updateField('typeRapport', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm text-slate-700">
+                      {TYPES_RAPPORT.map(type => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">Date</label>
+                    <input type="date" value={formData.date} onChange={e => updateField('date', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <label className="block text-xs font-bold text-slate-600 mb-1">Chauffeur / Gérant (Optionnel)</label>
+                    <input type="text" placeholder="Ex: Ali" value={formData.chauffeur} onChange={e => updateField('chauffeur', e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-sm" />
+                  </div>
+                  <div className="sm:col-span-4 flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                     {companyLogo ? (
+                       <div className="relative shrink-0">
+                         <img src={companyLogo} alt="Logo" className="h-12 w-12 object-contain bg-white rounded-lg border border-slate-200 shadow-sm" />
+                         <button onClick={removeLogo} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors"><X size={12}/></button>
+                       </div>
+                     ) : (
+                       <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-colors shrink-0">
+                         <ImageIcon size={16} className="text-blue-500"/>
+                         Ajouter un Logo
+                         <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                       </label>
+                     )}
+                     <p className="text-xs text-slate-400">Ce logo apparaîtra en haut à droite sur votre fiche au format Image/PDF.</p>
                   </div>
                 </div>
-              ))}
-              <button onClick={addRecette} className="w-full py-2.5 border-2 border-dashed border-emerald-300 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-50 transition-colors flex items-center justify-center gap-2">
-                <Plus size={16}/> Ajouter une Ligne de Recette
-              </button>
-            </div>
-          </div>
+              </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-rose-500">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-bold text-rose-600 uppercase tracking-widest flex items-center gap-2"><DollarSign size={16}/> Dépenses</h2>
-              <span className="bg-rose-100 text-rose-800 text-xs font-bold px-2 py-1 rounded-lg">Total : {formatArgent(totaux.depenses)} F</span>
-            </div>
-            
-            <div className="space-y-3">
-              {formData.depenses.map((d) => (
-                <div key={d.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
-                  <button onClick={() => removeDepense(d.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif de dépense</label>
-                      <select value={d.type} onChange={(e) => updateDepense(d.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-rose-500">
-                        {DEPENSES_DEFAUT.map(opt => <option key={opt}>{opt}</option>)}
-                      </select>
-                      {d.type === 'Autre...' && (
-                        <input type="text" placeholder="Quelle dépense ?" value={d.customType || ''} onChange={e => updateDepense(d.id, 'customType', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-rose-500" />
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-emerald-500">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-sm font-bold text-emerald-600 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> Recettes Véhicules</h2>
+                  <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded-lg">Total : {formatArgent(totaux.recettes)} F</span>
+                </div>
+                
+                <div className="space-y-3">
+                  {formData.recettes.map((r) => (
+                    <div key={r.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
+                      {formData.recettes.length > 1 && (
+                        <button onClick={() => removeRecette(r.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
                       )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
+                        <div className="sm:col-span-2">
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Véhicule (Nom ou Immatriculation)</label>
+                          <input type="text" placeholder="Ex: Suzuki Noire AB-1234..." value={r.vehicule} onChange={(e) => updateRecette(r.id, 'vehicule', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-emerald-500" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
+                          <input type="number" placeholder="Ex: 15000" value={r.montant} onChange={(e) => updateRecette(r.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none focus:border-emerald-500" />
+                        </div>
+                        <div>
+                           <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif de la recette</label>
+                           <select value={r.motif} onChange={(e) => updateRecette(r.id, 'motif', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-emerald-500">
+                             {MOTIFS_RECETTE.map(opt => <option key={opt}>{opt}</option>)}
+                           </select>
+                        </div>
+                        <div className="sm:col-span-2">
+                           <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails / Justification (Optionnel)</label>
+                           <input type="text" placeholder="Préciser si besoin (ex: demi-journée à cause de la pluie)..." value={r.justification} onChange={(e) => updateRecette(r.id, 'justification', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500" />
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
-                      <input type="number" placeholder="Ex: 5000" value={d.montant} onChange={(e) => updateDepense(d.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-rose-200 rounded-lg text-sm font-bold text-rose-700 outline-none focus:border-rose-500" />
-                    </div>
-                    <div className="sm:col-span-2">
-                       <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails de la dépense</label>
-                       <input type="text" placeholder="Précisez (ex: nom du garage, type de pièce)..." value={d.detail || ''} onChange={e => updateDepense(d.id, 'detail', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-rose-500" />
-                    </div>
-                  </div>
+                  ))}
+                  <button onClick={addRecette} className="w-full py-2.5 border-2 border-dashed border-emerald-300 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-50 transition-colors flex items-center justify-center gap-2">
+                    <Plus size={16}/> Ajouter une Ligne de Recette
+                  </button>
                 </div>
-              ))}
-              {formData.depenses.length === 0 && <p className="text-xs text-slate-400 italic">Aucune dépense ajoutée.</p>}
-              <button onClick={addDepense} className="w-full py-2.5 border-2 border-dashed border-rose-300 text-rose-600 rounded-xl text-sm font-bold hover:bg-rose-50 transition-colors flex items-center justify-center gap-2">
-                <Plus size={16}/> Ajouter une Dépense
-              </button>
-            </div>
-          </div>
+              </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-amber-500">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-bold text-amber-600 uppercase tracking-widest flex items-center gap-2"><History size={16}/> Arriérés & Dettes</h2>
-            </div>
-            
-            <div className="space-y-3">
-              {(formData.dettes || []).map((dette) => (
-                <div key={dette.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
-                  <button onClick={() => removeDette(dette.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                  
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-rose-500">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-sm font-bold text-rose-600 uppercase tracking-widest flex items-center gap-2"><DollarSign size={16}/> Dépenses</h2>
+                  <span className="bg-rose-100 text-rose-800 text-xs font-bold px-2 py-1 rounded-lg">Total : {formatArgent(totaux.depenses)} F</span>
+                </div>
+                
+                <div className="space-y-3">
+                  {formData.depenses.map((d) => (
+                    <div key={d.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
+                      <button onClick={() => removeDepense(d.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Motif de dépense</label>
+                          <select value={d.type} onChange={(e) => updateDepense(d.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-rose-500">
+                            {DEPENSES_DEFAUT.map(opt => <option key={opt}>{opt}</option>)}
+                          </select>
+                          {d.type === 'Autre...' && (
+                            <input type="text" placeholder="Quelle dépense ?" value={d.customType || ''} onChange={e => updateDepense(d.id, 'customType', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-rose-500" />
+                          )}
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant (FCFA)</label>
+                          <input type="number" placeholder="Ex: 5000" value={d.montant} onChange={(e) => updateDepense(d.id, 'montant', e.target.value)} className="w-full p-2 bg-white border border-rose-200 rounded-lg text-sm font-bold text-rose-700 outline-none focus:border-rose-500" />
+                        </div>
+                        <div className="sm:col-span-2">
+                           <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails de la dépense</label>
+                           <input type="text" placeholder="Précisez (ex: nom du garage, type de pièce)..." value={d.detail || ''} onChange={e => updateDepense(d.id, 'detail', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-rose-500" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {formData.depenses.length === 0 && <p className="text-xs text-slate-400 italic">Aucune dépense ajoutée.</p>}
+                  <button onClick={addDepense} className="w-full py-2.5 border-2 border-dashed border-rose-300 text-rose-600 rounded-xl text-sm font-bold hover:bg-rose-50 transition-colors flex items-center justify-center gap-2">
+                    <Plus size={16}/> Ajouter une Dépense
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-amber-500">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-sm font-bold text-amber-600 uppercase tracking-widest flex items-center gap-2"><History size={16}/> Arriérés & Dettes</h2>
+                </div>
+                
+                <div className="space-y-3">
+                  {(formData.dettes || []).map((dette) => (
+                    <div key={dette.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
+                      <button onClick={() => removeDette(dette.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                      
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Type d'arriéré / dette</label>
+                        <select value={dette.type} onChange={(e) => updateDette(dette.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none pr-8">
+                          {TYPES_DETTES.map(opt => <option key={opt}>{opt}</option>)}
+                        </select>
+                        {dette.type === 'Autre...' && (
+                          <input type="text" placeholder="Précisez..." value={dette.detail} onChange={e => updateDette(dette.id, 'detail', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none" />
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant Dû (Total)</label>
+                          <input type="number" placeholder="Ex: 10000" value={dette.montantDu} onChange={(e) => updateDette(dette.id, 'montantDu', e.target.value)} className="w-full p-2 bg-white border border-amber-200 rounded-lg text-sm font-bold text-amber-700 outline-none" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Payé ce jour</label>
+                          <input type="number" placeholder="Ex: 5000" value={dette.montantPaye} onChange={(e) => updateDette(dette.id, 'montantPaye', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none" />
+                        </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-slate-500">Reste non payé : <span className="text-amber-600">{formatArgent((parseFloat(dette.montantDu) || 0) - (parseFloat(dette.montantPaye) || 0))} FCFA</span></span>
+                      </div>
+                    </div>
+                  ))}
+                  {(!formData.dettes || formData.dettes.length === 0) && <p className="text-xs text-slate-400 italic">Aucun arriéré ou dette.</p>}
+                  <button onClick={addDette} className="w-full py-2.5 border-2 border-dashed border-amber-300 text-amber-600 rounded-xl text-sm font-bold hover:bg-amber-50 transition-colors flex items-center justify-center gap-2">
+                    <Plus size={16}/> Ajouter Dette / Arriéré
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-cyan-500">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-sm font-bold text-cyan-600 uppercase tracking-widest flex items-center gap-2"><TrendingUp size={16}/> Créances (Argent qu'on vous doit)</h2>
+                </div>
+                
+                <div className="space-y-3">
+                  {(formData.creances || []).map((creance) => (
+                    <div key={creance.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
+                      <button onClick={() => removeCreance(creance.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                      
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Type de Créance / Débiteur</label>
+                        <select value={creance.type} onChange={(e) => updateCreance(creance.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none pr-8">
+                          {TYPES_CREANCES.map(opt => <option key={opt}>{opt}</option>)}
+                        </select>
+                        {creance.type === 'Autre...' && (
+                          <input type="text" placeholder="Précisez..." value={creance.detail} onChange={e => updateCreance(creance.id, 'detail', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none" />
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant Prêté/Dû</label>
+                          <input type="number" placeholder="Ex: 15000" value={creance.montantDu} onChange={(e) => updateCreance(creance.id, 'montantDu', e.target.value)} className="w-full p-2 bg-white border border-cyan-200 rounded-lg text-sm font-bold text-cyan-700 outline-none" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Récupéré ce jour</label>
+                          <input type="number" placeholder="Ex: 5000" value={creance.montantRembourse} onChange={(e) => updateCreance(creance.id, 'montantRembourse', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none" />
+                        </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-slate-500">Reste à percevoir : <span className="text-cyan-600">{formatArgent((parseFloat(creance.montantDu) || 0) - (parseFloat(creance.montantRembourse) || 0))} FCFA</span></span>
+                      </div>
+                    </div>
+                  ))}
+                  {(!formData.creances || formData.creances.length === 0) && <p className="text-xs text-slate-400 italic">Aucune créance en cours.</p>}
+                  <button onClick={addCreance} className="w-full py-2.5 border-2 border-dashed border-cyan-300 text-cyan-600 rounded-xl text-sm font-bold hover:bg-cyan-50 transition-colors flex items-center justify-center gap-2">
+                    <Plus size={16}/> Ajouter une Créance
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 className="text-sm font-bold text-indigo-600 uppercase tracking-widest mb-4 flex items-center gap-2"><Clipboard size={16}/> Bilan & Caisse</h2>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
                   <div>
-                    <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Type d'arriéré / dette</label>
-                    <select value={dette.type} onChange={(e) => updateDette(dette.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none pr-8">
-                      {TYPES_DETTES.map(opt => <option key={opt}>{opt}</option>)}
-                    </select>
-                    {dette.type === 'Autre...' && (
-                      <input type="text" placeholder="Précisez..." value={dette.detail} onChange={e => updateDette(dette.id, 'detail', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none" />
-                    )}
+                    <label className="block text-[11px] font-bold text-teal-600 uppercase mb-1 flex items-center gap-1"><Banknote size={14}/> Caisse Générale (Initiale)</label>
+                    <input type="number" placeholder="Ex: 138500" value={formData.caisseDisponible} onChange={e => updateField('caisseDisponible', e.target.value)} className="w-full p-2.5 bg-teal-50 border border-teal-200 rounded-xl outline-none focus:border-teal-500 font-bold text-sm text-teal-800" />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant Dû (Total)</label>
-                      <input type="number" placeholder="Ex: 10000" value={dette.montantDu} onChange={(e) => updateDette(dette.id, 'montantDu', e.target.value)} className="w-full p-2 bg-white border border-amber-200 rounded-lg text-sm font-bold text-amber-700 outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Payé ce jour</label>
-                      <input type="number" placeholder="Ex: 5000" value={dette.montantPaye} onChange={(e) => updateDette(dette.id, 'montantPaye', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none" />
-                    </div>
-                  </div>
-                  
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-slate-500">Reste non payé : <span className="text-amber-600">{formatArgent((parseFloat(dette.montantDu) || 0) - (parseFloat(dette.montantPaye) || 0))} FCFA</span></span>
-                  </div>
-                </div>
-              ))}
-              {(!formData.dettes || formData.dettes.length === 0) && <p className="text-xs text-slate-400 italic">Aucun arriéré ou dette.</p>}
-              <button onClick={addDette} className="w-full py-2.5 border-2 border-dashed border-amber-300 text-amber-600 rounded-xl text-sm font-bold hover:bg-amber-50 transition-colors flex items-center justify-center gap-2">
-                <Plus size={16}/> Ajouter Dette / Arriéré
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-cyan-500">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-bold text-cyan-600 uppercase tracking-widest flex items-center gap-2"><TrendingUp size={16}/> Créances (Argent qu'on vous doit)</h2>
-            </div>
-            
-            <div className="space-y-3">
-              {(formData.creances || []).map((creance) => (
-                <div key={creance.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
-                  <button onClick={() => removeCreance(creance.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                  
                   <div>
-                    <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Type de Créance / Débiteur</label>
-                    <select value={creance.type} onChange={(e) => updateCreance(creance.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none pr-8">
-                      {TYPES_CREANCES.map(opt => <option key={opt}>{opt}</option>)}
-                    </select>
-                    {creance.type === 'Autre...' && (
-                      <input type="text" placeholder="Précisez..." value={creance.detail} onChange={e => updateCreance(creance.id, 'detail', e.target.value)} className="w-full mt-2 p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none" />
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Montant Prêté/Dû</label>
-                      <input type="number" placeholder="Ex: 15000" value={creance.montantDu} onChange={(e) => updateCreance(creance.id, 'montantDu', e.target.value)} className="w-full p-2 bg-white border border-cyan-200 rounded-lg text-sm font-bold text-cyan-700 outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Récupéré ce jour</label>
-                      <input type="number" placeholder="Ex: 5000" value={creance.montantRembourse} onChange={(e) => updateCreance(creance.id, 'montantRembourse', e.target.value)} className="w-full p-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700 outline-none" />
-                    </div>
+                    <label className="block text-[11px] font-bold text-indigo-600 uppercase mb-1">Versement effectué</label>
+                    <input type="number" placeholder="Ex: 10000" value={formData.versement} onChange={e => updateField('versement', e.target.value)} className="w-full p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-indigo-800" />
                   </div>
                   
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-slate-500">Reste à percevoir : <span className="text-cyan-600">{formatArgent((parseFloat(creance.montantDu) || 0) - (parseFloat(creance.montantRembourse) || 0))} FCFA</span></span>
+                  <div className="sm:col-span-2 flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm mt-1">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Reste en Caisse Générale :</span>
+                    <span className={`text-lg font-black ${totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
                   </div>
                 </div>
-              ))}
-              {(!formData.creances || formData.creances.length === 0) && <p className="text-xs text-slate-400 italic">Aucune créance en cours.</p>}
-              <button onClick={addCreance} className="w-full py-2.5 border-2 border-dashed border-cyan-300 text-cyan-600 rounded-xl text-sm font-bold hover:bg-cyan-50 transition-colors flex items-center justify-center gap-2">
-                <Plus size={16}/> Ajouter une Créance
-              </button>
-            </div>
-          </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-            <h2 className="text-sm font-bold text-indigo-600 uppercase tracking-widest mb-4 flex items-center gap-2"><Clipboard size={16}/> Bilan & Caisse</h2>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <div>
-                <label className="block text-[11px] font-bold text-teal-600 uppercase mb-1 flex items-center gap-1"><Banknote size={14}/> Caisse Générale (Initiale)</label>
-                <input type="number" placeholder="Ex: 138500" value={formData.caisseDisponible} onChange={e => updateField('caisseDisponible', e.target.value)} className="w-full p-2.5 bg-teal-50 border border-teal-200 rounded-xl outline-none focus:border-teal-500 font-bold text-sm text-teal-800" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-indigo-600 uppercase mb-1">Versement effectué</label>
-                <input type="number" placeholder="Ex: 10000" value={formData.versement} onChange={e => updateField('versement', e.target.value)} className="w-full p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-indigo-800" />
-              </div>
-              
-              <div className="sm:col-span-2 flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm mt-1">
-                <span className="text-xs font-bold text-slate-500 uppercase">Reste en Caisse Générale :</span>
-                <span className={`text-lg font-black ${totaux.resteEnCaisse < 0 ? 'text-red-500' : 'text-slate-800'}`}>{formatArgent(totaux.resteEnCaisse)} FCFA</span>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">Remarques générales</label>
-              <textarea placeholder="Signalements, informations générales..." value={formData.remarques} onChange={e => updateField('remarques', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm min-h-[80px] resize-none"></textarea>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-orange-500">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-bold text-orange-600 uppercase tracking-widest flex items-center gap-2"><Bell size={16}/> Alertes & Besoins</h2>
-            </div>
-            
-            <div className="space-y-3 mb-5">
-              {(formData.alertes || []).map((alerte) => (
-                <div key={alerte.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
-                  <button onClick={() => removeAlerte(alerte.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Type d'alerte</label>
-                      <select value={alerte.type} onChange={(e) => updateAlerte(alerte.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none">
-                        {TYPES_ALERTES.map(opt => <option key={opt}>{opt}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails / Date butoir</label>
-                      <input type="text" placeholder="Ex: Expire le 12 Mars..." value={alerte.description} onChange={(e) => updateAlerte(alerte.id, 'description', e.target.value)} className="w-full p-2 bg-white border border-orange-200 rounded-lg text-sm font-medium outline-none" />
-                    </div>
-                  </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Remarques générales</label>
+                  <textarea placeholder="Signalements, informations générales..." value={formData.remarques} onChange={e => updateField('remarques', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm min-h-[80px] resize-none"></textarea>
                 </div>
-              ))}
-              <button onClick={addAlerte} className="w-full py-2.5 border-2 border-dashed border-orange-300 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-50 transition-colors flex items-center justify-center gap-2">
-                <Plus size={16}/> Ajouter une Alerte (Assurance, Vidange...)
-              </button>
-            </div>
+              </div>
 
-            <div>
-              <label className="block text-[11px] font-bold text-orange-600 uppercase mb-1 flex items-center gap-1"><AlertTriangle size={14}/> Besoins / Demandes au propriétaire</label>
-              <textarea placeholder="Ex: Besoin d'argent pour acheter une nouvelle batterie..." value={formData.besoins} onChange={e => updateField('besoins', e.target.value)} className="w-full p-3 bg-orange-50/50 border border-orange-200 rounded-xl outline-none focus:border-orange-500 text-sm min-h-[60px] resize-none"></textarea>
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-orange-500">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-sm font-bold text-orange-600 uppercase tracking-widest flex items-center gap-2"><Bell size={16}/> Alertes & Besoins</h2>
+                </div>
+                
+                <div className="space-y-3 mb-5">
+                  {(formData.alertes || []).map((alerte) => (
+                    <div key={alerte.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3 relative">
+                      <button onClick={() => removeAlerte(alerte.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pr-6">
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Type d'alerte</label>
+                          <select value={alerte.type} onChange={(e) => updateAlerte(alerte.id, 'type', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-medium outline-none">
+                            {TYPES_ALERTES.map(opt => <option key={opt}>{opt}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Détails / Date butoir</label>
+                          <input type="text" placeholder="Ex: Expire le 12 Mars..." value={alerte.description} onChange={(e) => updateAlerte(alerte.id, 'description', e.target.value)} className="w-full p-2 bg-white border border-orange-200 rounded-lg text-sm font-medium outline-none" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={addAlerte} className="w-full py-2.5 border-2 border-dashed border-orange-300 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-50 transition-colors flex items-center justify-center gap-2">
+                    <Plus size={16}/> Ajouter une Alerte (Assurance, Vidange...)
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-orange-600 uppercase mb-1 flex items-center gap-1"><AlertTriangle size={14}/> Besoins / Demandes au propriétaire</label>
+                  <textarea placeholder="Ex: Besoin d'argent pour acheter une nouvelle batterie..." value={formData.besoins} onChange={e => updateField('besoins', e.target.value)} className="w-full p-3 bg-orange-50/50 border border-orange-200 rounded-xl outline-none focus:border-orange-500 text-sm min-h-[60px] resize-none"></textarea>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 animate-in fade-in">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                  <History className="text-blue-500"/> Archives
+                </h2>
+                <div className="relative w-full sm:w-64">
+                  <input type="text" placeholder="Rechercher (date, chauffeur, type)..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" />
+                  <Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
+                </div>
+              </div>
+
+              {filteredHistory.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <History size={40} className="mx-auto text-slate-300 mb-3" />
+                  <p className="text-slate-500 font-medium">Aucun rapport trouvé dans l'historique.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredHistory.map(report => (
+                    <div key={report.id} className="p-4 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center group">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase tracking-wider">{report.typeRapport}</span>
+                          <span className="text-sm font-bold text-slate-800">{new Date(report.date).toLocaleDateString('fr-FR')}</span>
+                        </div>
+                        <p className="text-xs text-slate-600">Flotte: <span className="font-bold text-slate-800">{report.flotteName}</span> {report.chauffeur && ` | Chauffeur: ${report.chauffeur}`}</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button onClick={() => loadReport(report)} className="flex-1 sm:flex-none px-3 py-2 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                          <Edit size={14}/> Éditer
+                        </button>
+                        <button onClick={() => deleteReport(report.id)} className="px-3 py-2 bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-400 text-xs rounded-lg transition-colors flex items-center justify-center">
+                          <Trash2 size={14}/>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
         </div>
 
@@ -679,18 +794,23 @@ export default function App() {
           </div>
 
           <div className="flex gap-2">
-            <button onClick={copyToClipboard} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
+            <button onClick={copyToClipboard} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm px-2">
               {copied ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Copy size={16} />}
-              {copied ? 'Copié !' : 'Copier Texte'}
+              <span className="hidden sm:inline">{copied ? 'Copié !' : 'Copier'}</span>
             </button>
-            <button onClick={downloadImage} disabled={isGenerating} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
+            <button onClick={sendWhatsApp} className="flex-1 py-3 bg-[#25D366] hover:bg-[#1ebd5b] text-white rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm px-2">
+              <Send size={16} />
+              <span className="hidden sm:inline">Envoyer</span>
+            </button>
+            <button onClick={downloadImage} disabled={isGenerating} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm px-2">
               {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-              Image HD
+              <span className="hidden sm:inline">Image</span>
             </button>
           </div>
 
           <div className="bg-slate-200/50 p-4 rounded-3xl border border-slate-200 flex justify-center overflow-hidden">
             
+            {}
             {previewMode === 'fiche' && (
               <div id="fiche-preview" className="w-full max-w-sm bg-[#f8fafc] rounded-2xl shadow-lg border border-slate-200 flex flex-col overflow-hidden text-slate-800 pb-4">
                 <div className="bg-slate-900 p-5 text-white">
@@ -803,7 +923,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* NOUVELLE SECTION BILAN & CAISSE (Basée sur l'image) */}
                   <div className="space-y-4 bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl shadow-sm">
                     <h5 className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
                       <Clipboard size={14} className="text-indigo-600"/> 3. Bilan & Caisse
@@ -839,44 +958,40 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* NOUVELLE SECTION : ALERTES, BESOINS & REMARQUES (Correction) */}
-                  {(formData.alertes?.length > 0 || formData.besoins || formData.remarques) && (
-                    <div className="space-y-3 pt-2">
-                      {(formData.alertes?.length > 0 || formData.besoins) && (
-                        <div className="bg-orange-50/60 border border-orange-100 p-4 rounded-2xl shadow-sm">
-                          <h5 className="text-[10px] font-bold text-orange-800 uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                            <Bell size={12} className="text-orange-600"/> Alertes & Besoins
-                          </h5>
-                          
-                          {formData.alertes?.length > 0 && (
-                            <div className="space-y-2 mb-3">
-                              {formData.alertes.map(a => (
-                                <div key={a.id} className="bg-white p-2.5 rounded-xl border border-orange-100 flex gap-2 text-xs shadow-sm">
-                                  <span className="font-bold text-orange-700 shrink-0">🔴 {a.type === 'Autre...' ? 'Alerte' : a.type} :</span>
-                                  <span className="text-orange-900">{a.description}</span>
-                                </div>
-                              ))}
+                  {(formData.alertes?.length > 0 || formData.besoins) && (
+                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-3">
+                      <h4 className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-2 flex items-center gap-1"><Bell size={12}/> Alertes & Nécessités</h4>
+                      
+                      {formData.alertes?.length > 0 && (
+                        <div className="space-y-1.5 mb-2">
+                          {formData.alertes.map(a => (
+                            <div key={a.id} className="text-xs bg-white p-2 rounded-lg border border-orange-100 flex gap-2">
+                              <span className="font-bold text-orange-800 shrink-0">{a.type === 'Autre...' ? 'Alerte' : a.type} :</span>
+                              <span className="text-orange-900">{a.description}</span>
                             </div>
-                          )}
-
-                          {formData.besoins && (
-                            <div className="bg-white p-3 rounded-xl border border-orange-200 text-xs text-orange-900 italic shadow-sm">
-                              <span className="font-bold block mb-1 not-italic">Demandes / Besoins :</span>
-                              {formData.besoins}
-                            </div>
-                          )}
+                          ))}
                         </div>
                       )}
 
-                      {formData.remarques && (
-                        <div className="bg-slate-50 text-slate-700 p-3.5 rounded-2xl border border-slate-200 text-xs whitespace-pre-wrap shadow-sm">
-                          <span className="font-bold block mb-1">📝 Remarques :</span>
-                          {formData.remarques}
+                      {formData.besoins && (
+                        <div className="text-xs bg-white p-2.5 rounded-lg border border-orange-200 text-orange-900 italic">
+                          <span className="font-bold block mb-0.5 not-italic">Demandes / Besoins :</span>
+                          {formData.besoins}
                         </div>
                       )}
                     </div>
                   )}
 
+                  {formData.remarques && (
+                    <div className="text-xs bg-amber-50 text-amber-900 p-3 rounded-lg border border-amber-100 whitespace-pre-wrap mt-3">
+                      <span className="font-bold block mb-1">Remarques :</span>
+                      {formData.remarques}
+                    </div>
+                  )}
+
+                  <div className="text-center pt-2 mt-2">
+                     <span className="text-[8px] uppercase tracking-widest text-slate-300 font-bold">Généré par Flotte Pro</span>
+                  </div>
                 </div>
               </div>
             )}
