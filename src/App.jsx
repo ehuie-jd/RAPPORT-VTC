@@ -272,14 +272,22 @@ export default function App() {
     }
   };
 
-  // NOUVEAU : Filtre de recherche
+  // AMÉLIORATION : Filtre de recherche intelligent (parfait pour les dates)
   const filteredHistory = reportsHistory.filter(report => {
     const searchLower = searchQuery.toLowerCase();
+    
+    // Traduction de la date pour que la recherche comprenne "26/06/2026" ou "Juin 2026"
+    const dateObj = new Date(report.date);
+    const dateFrLong = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).toLowerCase();
+    const dateFrShort = dateObj.toLocaleDateString('fr-FR');
+    
     return (
       report.flotteName?.toLowerCase().includes(searchLower) ||
       report.chauffeur?.toLowerCase().includes(searchLower) ||
-      report.date?.includes(searchLower) ||
-      report.typeRapport?.toLowerCase().includes(searchLower)
+      report.typeRapport?.toLowerCase().includes(searchLower) ||
+      report.date?.includes(searchLower) || // Format machine: 2026-06-26
+      dateFrLong.includes(searchLower) ||   // Format texte: 26 juin 2026
+      dateFrShort.includes(searchLower)     // Format classique: 26/06/2026
     );
   });
 
@@ -741,7 +749,7 @@ export default function App() {
                   <History className="text-blue-500"/> Archives
                 </h2>
                 <div className="relative w-full sm:w-64">
-                  <input type="text" placeholder="Rechercher (date, chauffeur, type)..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" />
+                  <input type="text" placeholder="Ex: 26/06/2026, Juin, Ali..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" />
                   <Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
                 </div>
               </div>
@@ -752,27 +760,50 @@ export default function App() {
                   <p className="text-slate-500 font-medium">Aucun rapport trouvé dans l'historique.</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {filteredHistory.map(report => (
-                    <div key={report.id} className="p-4 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center group">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase tracking-wider">{report.typeRapport}</span>
-                          <span className="text-sm font-bold text-slate-800">{new Date(report.date).toLocaleDateString('fr-FR')}</span>
+                <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-2 pb-4">
+                  {/* TRI AUTOMATIQUE PAR DATE ET AFFICHAGE EN BASE DE DONNÉES */}
+                  {filteredHistory.sort((a, b) => new Date(b.date) - new Date(a.date)).map(report => {
+                    // Calcul rapide des totaux pour l'aperçu sur la carte (sans avoir besoin d'ouvrir)
+                    const cardRecettes = report.recettes?.reduce((sum, r) => sum + (parseFloat(r.montant) || 0), 0) || 0;
+                    const cardDepenses = report.depenses?.reduce((sum, d) => sum + (parseFloat(d.montant) || 0), 0) || 0;
+
+                    return (
+                      <div key={report.id} className="p-4 rounded-xl border-2 border-slate-100 hover:border-blue-300 hover:shadow-md transition-all bg-white flex flex-col gap-3 relative overflow-hidden group">
+                        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 rounded-l-xl"></div>
+                        
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pl-2">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase tracking-wider">{report.typeRapport}</span>
+                              <span className="text-sm font-black text-slate-800 capitalize">{new Date(report.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                            </div>
+                            <p className="text-xs text-slate-600">Flotte : <span className="font-bold text-slate-800">{report.flotteName}</span> {report.chauffeur && ` | Gérant : ${report.chauffeur}`}</p>
+                          </div>
+                          
+                          {/* PETIT RÉSUMÉ FINANCIER VISIBLE DIRECTEMENT DANS L'HISTORIQUE */}
+                          <div className="flex gap-2 mt-3 sm:mt-0 bg-slate-50 p-2 rounded-lg border border-slate-100 w-full sm:w-auto justify-center shadow-inner">
+                            <div className="text-center px-3 border-r border-slate-200">
+                               <span className="block text-[9px] uppercase text-emerald-600 font-bold mb-0.5">Recettes</span>
+                               <span className="text-xs font-black text-emerald-700">{formatArgent(cardRecettes)} F</span>
+                            </div>
+                            <div className="text-center px-3">
+                               <span className="block text-[9px] uppercase text-rose-600 font-bold mb-0.5">Dépenses</span>
+                               <span className="text-xs font-black text-rose-700">{formatArgent(cardDepenses)} F</span>
+                            </div>
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-600">Flotte: <span className="font-bold text-slate-800">{report.flotteName}</span> {report.chauffeur && ` | Chauffeur: ${report.chauffeur}`}</p>
+                        
+                        <div className="flex items-center gap-2 pt-3 border-t border-slate-100 pl-2">
+                          <button onClick={() => loadReport(report)} className="flex-1 py-2.5 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                            <Edit size={14}/> Ouvrir ce rapport
+                          </button>
+                          <button onClick={() => deleteReport(report.id)} className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-400 text-xs rounded-lg transition-colors flex items-center justify-center shadow-sm">
+                            <Trash2 size={16}/>
+                          </button>
+                        </div>
                       </div>
-                      
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <button onClick={() => loadReport(report)} className="flex-1 sm:flex-none px-3 py-2 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5">
-                          <Edit size={14}/> Éditer
-                        </button>
-                        <button onClick={() => deleteReport(report.id)} className="px-3 py-2 bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-400 text-xs rounded-lg transition-colors flex items-center justify-center">
-                          <Trash2 size={14}/>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
